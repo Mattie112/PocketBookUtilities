@@ -114,6 +114,23 @@ class TestReviewDialog(unittest.TestCase):
         item = dialog.table.item(0, 0)
         self.assertFalse(bool(item.flags() & Qt.ItemFlag.ItemIsUserCheckable))
 
+    def test_rows_are_sorted_by_book_then_field(self):
+        titles = [self.dialog.table.item(row, 1).text()
+                  for row in range(self.dialog.table.rowCount())]
+        self.assertEqual(titles, sorted(titles, key=str.casefold))
+
+    def test_selection_survives_re_sorting(self):
+        """Tick boxes must follow their row when the user re-sorts."""
+        from qt.core import Qt
+        self.dialog.select_all()
+        self.dialog.table.sortItems(1, Qt.SortOrder.DescendingOrder)
+        self.dialog.select_trusted()
+        self.dialog.apply_selection()
+        selected = [c for c in self.plan.all_changes if c.selected]
+        self.assertEqual(len(selected), 3)
+        self.assertTrue(all(c.link.is_trusted for c in selected),
+                        'the wrong rows were unticked after sorting')
+
     def test_direction_is_shown_both_ways(self):
         texts = {self.dialog.table.item(row, 3).text()
                  for row in range(self.dialog.table.rowCount())}

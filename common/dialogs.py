@@ -127,7 +127,13 @@ class ChangeReviewDialog(QDialog):
         self.plan = plan
         self.read_only = read_only
         self.field_labels = field_labels
-        self.changes = list(plan.calibre_changes) + list(plan.device_changes)
+        # Sorted by book, then by field, so a book's changes stay together
+        # and the order is something the reader can predict. Clicking a
+        # column header re-sorts.
+        self.changes = sorted(
+            list(plan.calibre_changes) + list(plan.device_changes),
+            key=lambda c: ((c.link.title or '').casefold(),
+                           field_labels.get(c.field, c.field)))
 
         self.setWindowTitle(title)
         layout = QVBoxLayout(self)
@@ -135,6 +141,11 @@ class ChangeReviewDialog(QDialog):
         heading = QLabel(plan.summary())
         heading.setWordWrap(True)
         layout.addWidget(heading)
+
+        sort_note = QLabel('Sorted by book, then by what changes. '
+                           'Click a column heading to sort by it.')
+        sort_note.setStyleSheet('color: palette(mid);')
+        layout.addWidget(sort_note)
 
         if read_only:
             note = QLabel('This is a dry run. Nothing will be written.')
@@ -154,6 +165,7 @@ class ChangeReviewDialog(QDialog):
                                     QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(WHY_COL, QHeaderView.ResizeMode.Stretch)
         self.table.resizeColumnToContents(CHECK_COL)
+        self.table.setSortingEnabled(True)
         layout.addWidget(self.table)
 
         if not read_only:
@@ -186,6 +198,9 @@ class ChangeReviewDialog(QDialog):
     def _fill(self):
         for row, change in enumerate(self.changes):
             check = QTableWidgetItem()
+            # Remember which change this row is, so the tick boxes still map
+            # correctly after the user re-sorts the table.
+            check.setData(Qt.ItemDataRole.UserRole, row)
             if self.read_only:
                 check.setFlags(Qt.ItemFlag.ItemIsEnabled)
             else:
@@ -220,9 +235,19 @@ class ChangeReviewDialog(QDialog):
             self.table.setItem(row, WHY_COL, why)
 
     # -- selection helpers ---------------------------------------------
-    def _set_all(self, predicate):
-        for row, change in enumerate(self.changes):
+    def _rows(self):
+        """``(check_item, change)`` pairs, correct whatever the sort order."""
+        for row in range(self.table.rowCount()):
             item = self.table.item(row, CHECK_COL)
+            if item is None:
+                continue
+            index = item.data(Qt.ItemDataRole.UserRole)
+            if index is None or not 0 <= int(index) < len(self.changes):
+                continue
+            yield item, self.changes[int(index)]
+
+    def _set_all(self, predicate):
+        for item, change in self._rows():
             item.setCheckState(Qt.CheckState.Checked if predicate(change)
                                else Qt.CheckState.Unchecked)
 
@@ -239,8 +264,7 @@ class ChangeReviewDialog(QDialog):
         """Copy the tick boxes back onto the plan."""
         if self.read_only:
             return self.plan
-        for row, change in enumerate(self.changes):
-            item = self.table.item(row, CHECK_COL)
+        for item, change in self._rows():
             change.selected = item.checkState() == Qt.CheckState.Checked
         return self.plan
 
