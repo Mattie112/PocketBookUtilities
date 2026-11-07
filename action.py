@@ -145,6 +145,7 @@ class PocketBookUtilitiesAction(InterfaceAction):
 
         send = self.menu.addMenu('Send to device')
         send.setEnabled(ready)
+        _explain(send, ready, no_device if not has_device else not_set_up)
         add('Send &everything (overwrite the device)…',
             partial(self.forced_sync, Mode.FORCE_SEND, None),
             enabled=ready, menu=send)
@@ -159,6 +160,7 @@ class PocketBookUtilitiesAction(InterfaceAction):
 
         load = self.menu.addMenu('Load from device')
         load.setEnabled(ready)
+        _explain(load, ready, no_device if not has_device else not_set_up)
         add('Load &everything (overwrite calibre)…',
             partial(self.forced_sync, Mode.FORCE_LOAD, None),
             enabled=ready, menu=load)
@@ -545,6 +547,13 @@ class PocketBookUtilitiesAction(InterfaceAction):
     def show_configuration(self):
         self.interface_action_base_plugin.do_user_config(self.gui)
         self.rebuild_menus()
+
+
+def _explain(submenu, enabled, why):
+    """Give a disabled submenu a reason instead of echoing its own name."""
+    action = submenu.menuAction()
+    action.setToolTip('' if enabled else why)
+    action.setStatusTip('' if enabled else why)
 
 
 def _device_side():
