@@ -76,7 +76,31 @@ class PocketBookUtilitiesAction(InterfaceAction):
         # look for one directly as well.
         from qt.core import QTimer
         QTimer.singleShot(2000, self._catch_up_with_device)
+        QTimer.singleShot(2500, self._warn_if_unreachable)
         self.rebuild_menus()
+
+    def _warn_if_unreachable(self):
+        """Say so when the plugin has loaded but has nowhere to be clicked.
+
+        Without this the plugin is invisible and the user has no way to tell
+        it apart from a failed install.
+        """
+        from calibre.gui2 import gprefs
+        from calibre_plugins.pocketbook_utilities import toolbar
+
+        if toolbar.is_reachable(gprefs):
+            return
+        debug('the plugin has no toolbar button')
+        if question_dialog(
+                self.gui, 'PocketBook Utilities has no button',
+                'PocketBook Utilities is installed, but it has no button on '
+                'any toolbar, so there is no way to open its menu.\n\n'
+                'calibre\'s default toolbar holds built-in actions only; a '
+                'plugin button has to be added. Add one now?',
+                show_copy_button=False):
+            message = toolbar.ensure_button(self.gui)
+            if message:
+                info_dialog(self.gui, 'Button added', message, show=True)
 
     def _catch_up_with_device(self):
         if self.device is not None:
@@ -271,10 +295,18 @@ class PocketBookUtilitiesAction(InterfaceAction):
         return text
 
     def run_setup_wizard(self):
+        from calibre.gui2 import gprefs
+        from calibre_plugins.pocketbook_utilities import toolbar
+
         device = self.device
-        wizard = SetupWizard(self.gui, device, self._create_columns)
+        needs_button = not toolbar.is_reachable(gprefs)
+        wizard = SetupWizard(self.gui, device, self._create_columns,
+                             needs_toolbar_button=needs_button)
         if not wizard.exec():
             return
+        if wizard.wants_toolbar_button:
+            self.guarded('Could not add the toolbar button',
+                         toolbar.ensure_button, self.gui)
         if wizard.wants_backup:
             self.guarded('Backup failed', self.backup_now, quiet=True)
         if wizard.wants_dry_run:

@@ -276,11 +276,13 @@ class ChangeReviewDialog(QDialog):
 class SetupWizard(QDialog):
     """Shown once per device: explains what the plugin does, then sets it up."""
 
-    def __init__(self, parent, device, on_setup_columns):
+    def __init__(self, parent, device, on_setup_columns,
+                 needs_toolbar_button=False):
         QDialog.__init__(self, parent)
         self.device = device
         self.on_setup_columns = on_setup_columns
         self.columns_done = False
+        self.needs_toolbar_button = needs_toolbar_button
 
         self.setWindowTitle('Set up PocketBook Utilities')
         layout = QVBoxLayout(self)
@@ -308,6 +310,16 @@ class SetupWizard(QDialog):
         self.result_label.setWordWrap(True)
         layout.addWidget(self.result_label)
 
+        self.toolbar_box = QCheckBox(
+            'Add a PocketBook Utilities button to the toolbar')
+        self.toolbar_box.setChecked(True)
+        self.toolbar_box.setToolTip(
+            'calibre\'s default toolbar contains built-in actions only, so '
+            'no plugin button appears there unless one is added. Without it '
+            'the plugin has no menu you can open.')
+        self.toolbar_box.setVisible(needs_toolbar_button)
+        layout.addWidget(self.toolbar_box)
+
         self.backup_box = QCheckBox(
             'Back up the device database before anything else')
         self.backup_box.setChecked(True)
@@ -331,6 +343,11 @@ class SetupWizard(QDialog):
         self.result_label.setText(text)
         self.columns_done = True
         self.setup_button.setEnabled(False)
+
+    @property
+    def wants_toolbar_button(self):
+        return (self.needs_toolbar_button
+                and self.toolbar_box.isChecked())
 
     @property
     def wants_backup(self):
