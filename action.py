@@ -20,7 +20,8 @@ from calibre_plugins.pocketbook_utilities.device.detect import get_device
 from calibre_plugins.pocketbook_utilities.sync.engine import Mode
 from calibre_plugins.pocketbook_utilities.sync.fields import BY_KEY, FIELDS
 
-PLUGIN_ICON = 'images/icon.png'
+#: Path inside the plugin zip, as build.py packs it.
+PLUGIN_ICON = 'resources/images/icon.png'
 
 FIELD_LABELS = {spec.key: spec.label for spec in FIELDS}
 
@@ -52,14 +53,19 @@ class PocketBookUtilitiesAction(InterfaceAction):
     def _load_icon(self):
         try:
             data = self.load_resources([PLUGIN_ICON]).get(PLUGIN_ICON)
-            if not data:
-                return None
-            pixmap = QPixmap()
-            pixmap.loadFromData(data)
-            return QIcon(pixmap)
         except Exception as err:
-            debug('could not load the plugin icon: %s' % err)
+            debug('could not read %s from the plugin: %s'
+                  % (PLUGIN_ICON, err))
             return None
+        if not data:
+            debug('%s is missing from the plugin zip; the toolbar button '
+                  'will show text only' % PLUGIN_ICON)
+            return None
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(data):
+            debug('%s is not a readable image' % PLUGIN_ICON)
+            return None
+        return QIcon(pixmap)
 
     def initialization_complete(self):
         try:
