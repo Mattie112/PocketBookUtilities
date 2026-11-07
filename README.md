@@ -1,228 +1,181 @@
 # PocketBook Utilities
 
-A [calibre](https://calibre-ebook.com/) plugin that keeps your **reading
-status, reading position, progress, favourites and collections** in step
-between a PocketBook e-reader and your calibre library — and repairs the
-author information the reader sorts by.
+A calibre plugin for PocketBook e-readers. It syncs reading status, reading
+position, progress, favourites and collections between the reader and your
+calibre library, and can fix the author information PocketBook sorts by.
 
-It is what [Kobo
-Utilities](https://github.com/janlarres/kobo-utilities) is for Kobo owners,
-built for PocketBook.
-
----
+Think of it as the PocketBook equivalent of
+[Kobo Utilities](https://github.com/janlarres/kobo-utilities).
 
 ## What it syncs
 
-| | Device | calibre column | Direction |
+| | Device field | calibre column | Direction |
 |---|---|---|---|
 | Read status | `books_settings.completed` | `#pb_read` | both ways |
-| Read date | `completed_ts` | `#pb_read_date` | device → calibre |
-| Last opened | `opentime` | `#pb_last_read` | device → calibre |
+| Read date | `completed_ts` | `#pb_read_date` | device to calibre |
+| Last opened | `opentime` | `#pb_last_read` | device to calibre |
 | Favourites | `favorite` | `#pb_favourite` | both ways |
-| Progress | `cpage` / `npage` | `#pb_progress` | device → calibre |
+| Progress | `cpage` / `npage` | `#pb_progress` | device to calibre |
 | Reading position | `position` | `#pb_position` | both ways |
-| Collections | `bookshelfs` + `bookshelfs_books` | `#pb_collections` | both ways |
+| Collections | `bookshelfs` | `#pb_collections` | both ways |
 
-Reading positions are stored by the reader as a `pbr:` URI wrapping a
-standard EPUB CFI, for example:
+Positions are stored by the reader as a `pbr:` URI around an EPUB CFI, like
+`pbr:/webkit?##epubcfi(/6/62!/4/2/4/1:1)`.
 
-```
-pbr:/webkit?##epubcfi(/6/62!/4/2/4/1:1)
-```
+There are a few extras:
 
-### Also included
+* **Fix titles, authors and series on the device.** PocketBook derives the
+  field it sorts authors by from the filename, which can produce entries like
+  `01, Clancy, Tom - Net Force Explorers` filed under "0". This writes
+  calibre's author sort, series and series number instead.
+* Automatic backups before every write, and a restore dialog.
+* A database integrity check that reports orphan rows without touching them.
+* A list of books on the device that aren't in your library.
 
-- **Fix titles, authors and series on the device** — PocketBook fills in the
-  field it sorts by from the filename, which often produces nonsense like
-  `firstauthor = "01, Clancy, Tom - Net Force Explorers"` filed under `0`.
-  This writes calibre's author sort, series and series number into the
-  device database instead.
-- **Automatic backups** before every write, with restore.
-- **Database integrity check** — reports orphan rows, never removes them.
-- **Books on the device not in this library** — a read-only report.
-- **Verify the last write** — see *Why ejecting matters*, below.
+## Compatibility
 
----
+Tested on a PocketBook InkPad 3 Color, library schema version 39.
 
-## Device compatibility
+It should work on any PocketBook whose firmware keeps its library in
+`system/explorer-3/explorer-3.db`, which covers firmware 5.x and 6.x and so
+most current models. `explorer-2.db` is tried as a fallback for older
+firmware but hasn't been tested.
 
-**Verified on:** PocketBook InkPad 3 Color (`PB743K3`), library database
-schema version 39.
+Devices aren't recognised by model or USB id. The plugin looks for the
+database file under the connected device's storage, so it doesn't matter
+which driver calibre picks. (The test device is matched by calibre as "Diva
+HD", which it handles fine.)
 
-**Expected to work on** any PocketBook whose firmware stores its library in
-`system/explorer-3/explorer-3.db` — which is PocketBook firmware 5.x and
-6.x, so most current models (Touch Lux, Touch HD, InkPad, InkPad X, InkPad
-Color, Era, Verse, Basic Lux and relatives). `explorer-2.db` is probed as a
-fallback for older firmware but has not been tested.
+Capabilities are read from the database at connect time with
+`PRAGMA table_info`. If a firmware is missing a column or table, the feature
+that needs it is disabled with a reason shown in the UI rather than failing
+at runtime. **Show device information** lists what your reader supports.
 
-The plugin does **not** recognise devices by model, USB id or calibre driver.
-It looks for `system/explorer-N/explorer-N.db` under the connected device's
-storage, so it works whichever driver calibre happens to pick — useful,
-because a PocketBook can be driven by calibre's built-in `POCKETBOOK*`
-drivers, by the third-party *PocketBook Improved* driver, or be matched as
-something else entirely. The author's device is matched by calibre as
-"Diva HD" and the plugin is unbothered.
+Not tested on real hardware, though covered by fixtures:
 
-**Features are decided at runtime, not assumed.** On connecting, the plugin
-reads the database schema with `PRAGMA table_info` and derives capability
-flags. A firmware that lacks a column or a table loses *that one feature*,
-disabled with a visible reason, rather than producing an error or writing
-something wrong. **Show device information** lists exactly what your reader
-supports.
+* SD card storage
+* multiple user profiles
+* `explorer-2.db` firmware
 
-### Known untested areas
+CoolReader positions (`.cr3hist`) are detected but not implemented. The test
+device reads EPUBs with the native engine, which keeps position in the
+database.
 
-These are implemented and unit-tested against fixtures, but no real hardware
-has exercised them:
-
-- SD-card storage (the reference device has none)
-- Multiple user profiles (`system/profiles/.current.lnk`)
-- `explorer-2.db` firmware
-- CoolReader reading positions (`.cr3hist`) — **not implemented**. The
-  reference device reads EPUBs with the native engine, which stores position
-  in the database. Detection is in place, so the channel can be added.
-
-**If you run this on another PocketBook**, please open an issue with the
-output of *Show device information*. It contains model, schema version and
-capability flags, and no book titles or file paths.
-
----
+If you run this on a different PocketBook, please open an issue with the
+output of **Show device information**. It contains the model, schema version
+and capability flags, and no titles or file paths.
 
 ## Requirements
 
-- calibre **5.35 or newer** (that is when programmatic custom-column creation
-  arrived). Developed against calibre 9.8.
-- The reader connected in **USB mass storage** mode, not MTP.
-- Nothing else. No Python packages to install.
-
----
+calibre 5.35 or newer (that's when programmatic column creation was added);
+developed against 9.8. The reader needs to be connected in USB mass storage
+mode rather than MTP. There are no Python dependencies.
 
 ## Installing
 
-**From calibre:** Preferences → Plugins → *Load plugin from file* → pick
-`PocketBook Utilities.zip`. Restart calibre.
+In calibre: Preferences, Plugins, *Load plugin from file*, pick
+`PocketBook Utilities.zip`, restart.
 
-**From a terminal:**
+Or from a terminal:
 
 ```bash
 calibre-customize -a "PocketBook Utilities.zip"
 ```
 
-> **Note:** installing from the command line registers the plugin but does
-> **not** put a button on the toolbar — calibre's default toolbar contains
-> built-in actions only. The plugin notices this on startup and offers to add
-> one. See *No toolbar button* under Troubleshooting.
-
----
+Installing this way registers the plugin but won't add a toolbar button,
+because calibre's default toolbar only contains built-in actions. The plugin
+notices and offers to add one on startup.
 
 ## First run
 
-1. Connect the reader. A setup dialog appears.
-2. Press **Set up columns**. Every custom column the plugin needs is created
-   in one go, with the right types.
-3. **Restart calibre** so the new columns load. The plugin refuses to sync
-   until you do, and says which columns it is waiting for.
-4. **Sync now (review changes)**.
+Connect the reader and a setup dialog appears. Press **Set up columns** to
+create the custom columns, then restart calibre so they load. (Syncing is
+blocked until you do, with a message saying which columns it's waiting for.)
+Then use **Sync now (review changes)**.
 
-Nothing is written anywhere until you have seen the list of proposed changes
-and pressed *Apply selected*.
+Nothing is written until you've seen the list of proposed changes and pressed
+*Apply selected*.
 
----
+## How conflicts are resolved
 
-## How it decides which side wins
+The plugin records what each side looked like after the last successful sync,
+so it can tell which side actually changed:
 
-The plugin remembers what each side looked like after the last successful
-sync, in its own small database. That makes the merge a genuine three-way
-merge rather than a timestamp comparison:
-
-| Device changed? | calibre changed? | Result |
+| Device changed | calibre changed | Result |
 |---|---|---|
-| no | no | nothing is proposed |
-| yes | no | loaded into calibre |
-| no | yes | sent to the device |
-| yes | yes | the more recent wins, flagged in the review list |
+| no | no | nothing proposed |
+| yes | no | load into calibre |
+| no | yes | send to device |
+| yes | yes | newer wins, flagged in the review list |
 
-An idle sync therefore proposes **nothing at all** — it does not rewrite your
-library and churn `last_modified` on every book.
+A sync with nothing to do proposes nothing, so repeated runs don't rewrite
+your library or bump `last_modified` on every book.
 
-**Send to device** and **Load from device** override the merge when you want
-one side to win outright.
+**Send to device** and **Load from device** skip the merge when you want one
+side to win outright.
 
-Every proposed change is listed with its direction and the reason it was
-chosen, sorted by book. Matches the plugin is less sure of — a book found by
-title and author rather than by path — arrive unticked and say so.
-
----
+Each proposed change shows its direction and why it was chosen. Books matched
+by title and author rather than by file path are listed unticked, since those
+matches are less certain.
 
 ## Collections
 
-Collection names can come from a custom column (the default,
-`#pb_collections`), from calibre **tags**, from the **series** name, or from a
-**template**. There is a preview button so you can see what any source would
-produce before using it.
-
----
+Collection names can come from a custom column (`#pb_collections` by
+default), calibre tags, the series name, or a template. The config dialog has
+a preview button to see what a given source produces.
 
 ## Safety
 
-- **Nothing is ever deleted on the device.** The plugin contains no `DELETE`
-  or `DROP` statement at all, and a unit test enforces that. Removing a book
-  from a collection sets `is_deleted`, which is what the firmware itself does.
-- **A backup is taken before every write**, to
-  `<calibre config>/plugins/pocketbook_utilities/backups/<serial>/`. The
-  newest ten are kept, plus the very first one ever taken.
-- **Reads never touch the device.** The database is in WAL mode, so a plain
-  file copy can read stale data; the plugin takes a consistent snapshot with
-  SQLite's online backup API and works on that. A test asserts the device
-  file is byte-identical after a read.
-- **Writes are one short transaction** on the device, so a cable pulled
-  mid-write cannot leave a half-written database.
-- **All SQL is parameterised.** Apostrophes in titles, authors and collection
-  names are ordinary data, not a crash.
+The plugin contains no `DELETE` or `DROP` statement; a unit test checks this.
+Removing a book from a collection sets `is_deleted`, which is what the
+firmware does itself.
 
-### Why ejecting matters
+Backups go to `<calibre config>/plugins/pocketbook_utilities/backups/<serial>/`
+before every write. The newest ten are kept along with the first one ever
+taken.
+
+Reads don't modify the device. The database runs in WAL mode, so a plain file
+copy can return stale data; the plugin takes a snapshot through SQLite's
+online backup API and works from that. Writes happen in a single short
+transaction on the device.
+
+All SQL is parameterised, so apostrophes in titles, authors and collection
+names are just data.
+
+### Ejecting
 
 PocketBook can rewrite its library database from memory when the USB
-connection drops, silently undoing anything written while it was plugged in.
+connection drops, undoing changes made while it was connected. Eject the
+reader from calibre before unplugging it.
 
-After every write the plugin records a receipt, and on the next connection it
-checks whether those changes are still there, telling you plainly if they
-were reverted. There is also an *Eject automatically after writing* option on
-the Device tab.
-
-**Eject the reader from calibre before unplugging it.**
-
----
+The plugin records a receipt after each write and checks on the next
+connection whether the changes survived, reporting it if they didn't. There's
+also an *Eject automatically after writing* option on the Device tab.
 
 ## Troubleshooting
 
-**No toolbar button.** calibre's default toolbar holds built-in actions only;
-no plugin appears there unless added. Resetting your toolbars to defaults
-removes it again. The plugin offers to add one on startup — or do it
-yourself in Preferences → Toolbars & menus → *The main toolbar* **and** *The
-main toolbar when a device is connected*.
+**No toolbar button.** calibre's default toolbar only holds built-in actions,
+and resetting toolbars to defaults removes any plugin button. The plugin
+offers to add one on startup, or add it under Preferences, Toolbars & menus,
+to both *The main toolbar* and *The main toolbar when a device is connected*.
 
-**"calibre has not loaded the new columns yet".** Expected right after
-creating columns: calibre only picks up new columns when it restarts.
-Restart and sync again.
+**"calibre has not loaded the new columns yet".** calibre only picks up new
+columns on restart. Restart and sync again.
 
-**Nothing is proposed.** That is the normal result when both sides already
-agree. The summary line tells you how many books were matched.
+**Nothing proposed.** Normal when both sides agree. The summary line shows
+how many books were matched.
 
-**Books are not matched.** Open *Books on the device not in this library*.
-Books calibre did not put on the reader are never touched. If calibre lists a
-book as being on the device but the reader's database does not know it, the
-reader has not re-scanned its library yet.
+**Books not matched.** Check *Books on the device not in this library*. Books
+calibre didn't put there are never modified. If calibre thinks a book is on
+the device but the reader's database doesn't list it, the reader hasn't
+rescanned yet.
 
-**Changes disappeared after unplugging.** See *Why ejecting matters*. Use
-*Verify the last write* to confirm, then sync again and eject properly.
+**Changes vanished after unplugging.** See the note on ejecting. *Verify the
+last write* will confirm it.
 
----
+## Implementation notes
 
-## How it works
-
-Worth knowing if you want to extend this. The device database lives at
-`system/explorer-3/explorer-3.db` and all reading state is in one table:
+All reading state lives in one table:
 
 ```sql
 books_settings(bookid, profileid, position TEXT, position_ts INTEGER,
@@ -232,75 +185,51 @@ books_settings(bookid, profileid, position TEXT, position_ts INTEGER,
                PRIMARY KEY(bookid, profileid))
 ```
 
-Books are matched to calibre by resolving each storage root against the
-filesystem, then by exact relative path, falling back to filename + size,
-filename alone, and finally title + author — each match tagged with a
-confidence.
+Books are matched by resolving each storage root against the filesystem, then
+by exact relative path, falling back to filename plus size, filename alone,
+and finally title and author. Each match carries a confidence level.
 
-Three firmware details shape the design:
+Three firmware details are worth knowing before changing anything:
 
-```sql
--- completed_ts is not ours to write: any UPDATE of completed, and any
--- INSERT at all, makes the device stamp it with the current time.
-CREATE TRIGGER completed_ts_update AFTER UPDATE ON books_settings
-  WHEN NEW.completed <> OLD.completed BEGIN ... END
-
--- the full-text search index maintains itself when title or author change,
--- so fixing metadata keeps on-device search correct for free.
-CREATE TRIGGER trigger_on_update_books_impl AFTER UPDATE ON books_impl
-  WHEN NEW.title != OLD.title OR NEW.author != OLD.author BEGIN ... END
-
--- and a collection name is UNIQUE, so an existing but soft-deleted shelf
--- must be undeleted, never re-inserted.
-CREATE TABLE bookshelfs(..., UNIQUE(name) ON CONFLICT FAIL)
-```
-
----
+* `completed_ts` isn't yours to set. Triggers overwrite it with the current
+  time on any update of `completed`, and on any insert.
+* The full-text search index updates itself when `title` or `author` change,
+  so fixing metadata keeps on-device search working.
+* `bookshelfs.name` is `UNIQUE ... ON CONFLICT FAIL`, so a soft-deleted shelf
+  has to be undeleted rather than re-inserted.
 
 ## Development
 
-Everything under `device/` and `sync/` is free of Qt and of the calibre GUI,
-so it is unit-testable headlessly. Run the tests with calibre's own Python:
+`device/` and `sync/` avoid Qt and the calibre GUI, so they can be tested
+headlessly. Use calibre's bundled Python:
 
 ```bash
-calibre-debug -e tests/run_tests.py
+calibre-debug -e tests/run_tests.py     # run the tests
+calibre-debug -e build.py               # build the zip
 ```
 
-Build the installable zip:
-
-```bash
-calibre-debug -e build.py
 ```
-
-`tests/schema_v39.sql` is dumped verbatim from a real device, triggers and
-indexes included, and the fixtures are built from it. One test asserts the
-fixture's schema fingerprint still matches a real device, so firmware drift
-surfaces as a test failure rather than a mystery at runtime. Others enforce
-the project's rules: no destructive SQL, no SQL built by concatenation, no
-silently swallowed exceptions, and an idempotence test that fails if a second
-sync proposes anything.
-
-```
-device/     detection, schema introspection, safe database access, backups
-sync/       identity matching, the merge engine, collections, metadata push
-common/     dialogs and small shared helpers
+device/     detection, schema introspection, database access, backups
+sync/       book matching, merge engine, collections, metadata push
+common/     dialogs and shared helpers
 action.py   toolbar menu and dispatch
-runner.py   read device -> build plan -> apply
-columns.py  the custom columns, and creating them in one pass
+runner.py   read device, build plan, apply
+columns.py  custom column definitions and creation
 ```
 
----
+`tests/schema_v39.sql` is dumped from a real device, triggers and indexes
+included, and the fixtures are built from it. One test compares the fixture's
+schema fingerprint against a connected device so firmware drift shows up as a
+test failure. Others check that no destructive SQL creeps in, that SQL isn't
+built by string concatenation, that exceptions aren't swallowed, and that a
+second sync run proposes nothing.
 
-## Credits and licence
+## Licence
 
-Written for a PocketBook InkPad 3 Color. The architecture follows the shape
-of [Kobo Utilities](https://github.com/janlarres/kobo-utilities), which is
-worth reading if you are building something similar. Knowledge of the
-PocketBook schema started from
+GPL v3, same as calibre. See `LICENSE`.
+
+The architecture follows
+[Kobo Utilities](https://github.com/janlarres/kobo-utilities). Initial
+knowledge of the PocketBook schema came from
 [Pocketbook Collections](https://github.com/Anareaty/pocketbook-collections)
 by Anareaty.
-
-Released under the **GNU GPL v3**, matching calibre.
-
-*No warranty. It takes a backup before every write, but you are the one
-holding the e-reader.*
