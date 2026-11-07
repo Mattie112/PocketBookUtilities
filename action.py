@@ -70,9 +70,30 @@ class PocketBookUtilitiesAction(InterfaceAction):
                 self._device_metadata)
         except Exception as err:
             debug('could not subscribe to device signals: %s' % err)
+
+        # A reader that was already plugged in when calibre started has
+        # emitted device_metadata_available before we could subscribe, so
+        # look for one directly as well.
+        from qt.core import QTimer
+        QTimer.singleShot(2000, self._catch_up_with_device)
         self.rebuild_menus()
 
+    def _catch_up_with_device(self):
+        if self.device is not None:
+            return
+        try:
+            device = get_device(self.gui)
+        except Exception as err:
+            debug('could not look for an already-connected device: %s' % err)
+            return
+        if device is None:
+            return
+        debug('found a device that was connected before we subscribed')
+        self._device_metadata()
+
     def library_changed(self, db):
+        self.device = None
+        self._catch_up_with_device()
         self.rebuild_menus()
 
     # -- device lifecycle ----------------------------------------------

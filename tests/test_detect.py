@@ -47,6 +47,35 @@ class TestDetection(FixtureTestCase):
         self.assertEqual(device.card_prefix, self.card_prefix)
         self.assertIn('FakeDriver', device.driver_name)
 
+    def test_detection_reports_capabilities(self):
+        """Detection must not hand back a device with empty capabilities.
+
+        The menu gates collection entries on caps.has_shelves, and the setup
+        wizard shows the schema version, so an uninspected device would
+        silently disable working features.
+        """
+        gui = FakeGui(FakeDriver(self.prefix, self.card_prefix))
+        device = detect.get_device(gui)
+        self.assertEqual(device.caps.db_version, 39)
+        self.assertTrue(device.caps.has_shelves)
+        self.assertTrue(device.caps.has_reading_state)
+
+    def test_capabilities_can_be_skipped(self):
+        gui = FakeGui(FakeDriver(self.prefix, self.card_prefix))
+        device = detect.get_device(gui, with_caps=False)
+        self.assertEqual(device.caps.db_version, 0)
+
+    def test_unreadable_database_still_detects_the_device(self):
+        """A database we cannot open must not make the reader vanish."""
+        import os
+        os.remove(self.db_path)
+        with open(self.db_path, 'wb') as handle:
+            handle.write(b'this is not a database')
+        gui = FakeGui(FakeDriver(self.prefix, self.card_prefix))
+        device = detect.get_device(gui)
+        self.assertIsNotNone(device)
+        self.assertEqual(device.caps.db_version, 0)
+
     def test_get_device_falls_back_to_the_card_slot(self):
         """Some drivers report the reader on the card prefix instead."""
         gui = FakeGui(FakeDriver(self.tmp, self.prefix))

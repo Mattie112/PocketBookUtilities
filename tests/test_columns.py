@@ -56,33 +56,56 @@ class TestSpecs(unittest.TestCase):
 
 
 class TestReuseDetection(unittest.TestCase):
+    """Reuse must only ever claim a field's own column.
 
-    def test_a_plain_read_bool_can_stand_in(self):
+    Matching on datatype alone once mapped `favourite` onto an unrelated
+    `#read` boolean, pointed `position` at `#kobo_reading_location`, and
+    gave two fields the same column.
+    """
+
+    def test_only_the_fields_own_lookup_name_is_reused(self):
+        spec = columns.BY_FIELD['read']
+        existing = {'pb_read': {'datatype': 'bool', 'is_multiple': None}}
+        self.assertEqual(columns.find_reusable(spec, existing), '#pb_read')
+
+    def test_an_unrelated_compatible_column_is_never_claimed(self):
         spec = columns.BY_FIELD['read']
         existing = {'read': {'datatype': 'bool', 'is_multiple': None,
                              'name': 'Read'}}
-        self.assertEqual(columns.find_reusable(spec, existing), '#read')
+        self.assertIsNone(columns.find_reusable(spec, existing))
+
+    def test_kobo_columns_are_never_claimed(self):
+        kobo = {
+            'kobo_reading_location': {'datatype': 'text',
+                                      'is_multiple': None},
+            'kobo_percent_read': {'datatype': 'int', 'is_multiple': None},
+            'kobo_last_read': {'datatype': 'datetime', 'is_multiple': None},
+        }
+        for field in ('position', 'progress', 'last_read', 'read_date'):
+            spec = columns.BY_FIELD[field]
+            self.assertIsNone(columns.find_reusable(spec, kobo),
+                              '%s tried to claim a Kobo column' % field)
+
+    def test_a_claimed_column_is_not_handed_out_twice(self):
+        spec = columns.BY_FIELD['read']
+        existing = {'pb_read': {'datatype': 'bool', 'is_multiple': None}}
+        self.assertIsNone(
+            columns.find_reusable(spec, existing, claimed={'#pb_read'}))
 
     def test_wrong_datatype_is_not_reused(self):
         spec = columns.BY_FIELD['read']
-        existing = {'read': {'datatype': 'text', 'is_multiple': None}}
+        existing = {'pb_read': {'datatype': 'text', 'is_multiple': None}}
         self.assertIsNone(columns.find_reusable(spec, existing))
 
     def test_multi_valued_mismatch_is_not_reused(self):
         spec = columns.BY_FIELD['collections']
-        single = {'shelf': {'datatype': 'text', 'is_multiple': None}}
+        single = {'pb_collections': {'datatype': 'text',
+                                     'is_multiple': None}}
         self.assertIsNone(columns.find_reusable(spec, single))
-        multi = {'shelf': {'datatype': 'text',
-                           'is_multiple': {'cache_to_list': ','}}}
-        self.assertEqual(columns.find_reusable(spec, multi), '#shelf')
-
-    def test_exact_name_wins_over_another_compatible_column(self):
-        spec = columns.BY_FIELD['read']
-        existing = {
-            'aaa_other': {'datatype': 'bool', 'is_multiple': None},
-            'pb_read': {'datatype': 'bool', 'is_multiple': None},
-        }
-        self.assertEqual(columns.find_reusable(spec, existing), '#pb_read')
+        multi = {'pb_collections': {'datatype': 'text',
+                                    'is_multiple': {'cache_to_list': ','}}}
+        self.assertEqual(columns.find_reusable(spec, multi),
+                         '#pb_collections')
 
 
 class TestAgainstAScratchLibrary(unittest.TestCase):
@@ -146,13 +169,38 @@ class TestAgainstAScratchLibrary(unittest.TestCase):
         self.assertEqual(present['pb_read']['datatype'], 'text')
         self.assertEqual(present['pb_read_1']['datatype'], 'bool')
 
-    def test_existing_read_column_is_reused_rather_than_duplicated(self):
-        self.db.create_custom_column(label='read', name='Read',
-                                     datatype='bool', is_multiple=False,
-                                     display={})
+    def test_a_library_with_kobo_columns_keeps_them_untouched(self):
+        """The exact library this plugin was first run against."""
+        for label, name, datatype in (
+                ('read', 'Read', 'bool'),
+                ('kobo_reading_location', 'Kobo reading location', 'text'),
+                ('kobo_percent_read', 'Kobo % read', 'int'),
+                ('kobo_last_read', 'Kobo last read', 'datetime')):
+            self.db.create_custom_column(label=label, name=name,
+                                         datatype=datatype,
+                                         is_multiple=False, display={})
+
         result = columns.ensure_columns(self.db, reuse_existing=True)
-        self.assertEqual(result.reused.get('read'), '#read')
-        self.assertNotIn('pb_read', self.lookup_names())
+
+        self.assertEqual(result.failed, {}, result.describe())
+        self.assertEqual(result.reused, {},
+                         'nothing of the user\'s should have been claimed')
+        self.assertEqual(len(result.created), len(columns.COLUMN_SPECS))
+        for lookup in result.mapping.values():
+            self.assertTrue(lookup.startswith('#pb_'),
+                            '%s is not in the plugin namespace' % lookup)
+
+    def test_no_two_fields_share_a_column(self):
+        result = columns.ensure_columns(self.db, reuse_existing=True)
+        lookups = list(result.mapping.values())
+        self.assertEqual(len(lookups), len(set(lookups)),
+                         'a column was handed to two fields: %r' % lookups)
+
+    def test_rerunning_reuses_only_the_plugins_own_columns(self):
+        first = columns.ensure_columns(self.db, reuse_existing=False)
+        second = columns.ensure_columns(self.db, reuse_existing=True)
+        self.assertEqual(second.created, {})
+        self.assertEqual(second.mapping, first.mapping)
 
     def test_only_fields_limits_what_is_created(self):
         result = columns.ensure_columns(self.db, reuse_existing=False,

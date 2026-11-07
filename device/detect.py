@@ -207,7 +207,26 @@ def describe_path(prefix, driver_name='manual'):
         return complete_from_db(device, copy.conn)
 
 
-def get_device(gui):
+def with_capabilities(device):
+    """Fill in ``caps`` and the profile by reading the device database.
+
+    Detection itself only looks at the filesystem, which is cheap and works
+    no matter which driver calibre picked. Everything downstream needs the
+    capability flags, though, so they are read here -- and a database we
+    cannot open leaves the flags empty rather than failing detection.
+    """
+    if device is None:
+        return None
+    try:
+        with dbmod.WorkingCopy(device.db_path) as copy:
+            return complete_from_db(device, copy.conn)
+    except Exception as err:
+        debug('could not read capabilities from %s: %s'
+              % (device.db_path, err))
+        return device
+
+
+def get_device(gui, with_caps=True):
     """The connected PocketBook, or ``None``.
 
     Imports of calibre internals stay inside the function so this module can
@@ -233,6 +252,6 @@ def get_device(gui):
                               driver_name=driver_name)
         if device is not None:
             debug('detected PocketBook at', prefix)
-            return device
+            return with_capabilities(device) if with_caps else device
     debug('connected device has no system/explorer-N database')
     return None

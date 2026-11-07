@@ -105,18 +105,22 @@ def column_is_compatible(spec, metadata):
     return bool(metadata.get('is_multiple')) == spec.is_multiple
 
 
-def find_reusable(spec, current_columns):
-    """An existing column that already fits, preferring the default name.
+def find_reusable(spec, current_columns, claimed=()):
+    """Reuse only this field's *own* column, never someone else's.
 
-    Lets the user keep a column they already have -- a plain ``#read``
-    boolean, say -- instead of ending up with a near-duplicate.
+    Matching on datatype alone is far too loose: a boolean field would
+    happily adopt an unrelated ``#read`` column, and two different fields
+    would adopt the same one. The only safe automatic reuse is a column that
+    already carries this field's own lookup name, left over from an earlier
+    setup. Anything else is the user's deliberate choice, made on the Columns
+    tab.
     """
-    exact = current_columns.get(spec.lookup.lstrip('#'))
-    if column_is_compatible(spec, exact):
-        return spec.lookup
-    for name, meta in sorted(current_columns.items()):
-        if column_is_compatible(spec, meta):
-            return '#' + name.lstrip('#')
+    lookup = spec.lookup
+    if lookup in claimed:
+        return None
+    existing = current_columns.get(lookup.lstrip('#'))
+    if column_is_compatible(spec, existing):
+        return lookup
     return None
 
 
@@ -244,15 +248,17 @@ def ensure_columns(db, specs=None, reuse_existing=True, only_fields=None):
     result = SetupResult()
     current = current_custom_columns(db)
     headings = {meta.get('name') for meta in current.values()}
+    claimed = set()
 
     for spec in specs:
         if only_fields is not None and spec.field not in only_fields:
             continue
 
         if reuse_existing:
-            existing = find_reusable(spec, current)
+            existing = find_reusable(spec, current, claimed)
             if existing:
                 result.reused[spec.field] = existing
+                claimed.add(existing)
                 continue
 
         problem = validate(spec)
@@ -275,6 +281,7 @@ def ensure_columns(db, specs=None, reuse_existing=True, only_fields=None):
             continue
 
         result.created[spec.field] = '#' + label
+        claimed.add('#' + label)
         result.needs_restart = True
         current = current_custom_columns(db)
         headings.add(heading)

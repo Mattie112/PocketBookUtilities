@@ -74,19 +74,33 @@ def collect_calibre_books(gui):
     return list(found.values())
 
 
+def read_column(api, column, book_ids):
+    """``all_field_for`` that tolerates a column calibre has not loaded.
+
+    ``db.create_custom_column`` writes the column straight away, but calibre
+    only picks it up when it restarts -- until then ``all_field_for`` raises
+    ``KeyError``. Treating that as "calibre has no values yet" is exactly
+    right, and it is what lets the dry run run immediately after setup.
+    """
+    if not column:
+        return {}
+    try:
+        return api.all_field_for(column, book_ids)
+    except KeyError:
+        debug('column %s is not loaded yet; treating it as empty' % column)
+        return {}
+    except Exception as err:
+        debug('cannot read column %s: %s' % (column, err))
+        return {}
+
+
 def read_calibre_values(gui, settings, book_ids, field_keys):
     """``{calibre_id: {field_key: value}}`` plus the last-modified map."""
     api = gui.current_db.new_api
     values = {book_id: {} for book_id in book_ids}
     for key in field_keys:
-        column = column_for_field(settings, key)
-        if not column:
-            continue
-        try:
-            column_values = api.all_field_for(column, book_ids)
-        except Exception as err:
-            debug('cannot read column %s: %s' % (column, err))
-            continue
+        column_values = read_column(api, column_for_field(settings, key),
+                                    book_ids)
         for book_id, value in column_values.items():
             values[book_id][key] = value
     modified = api.all_field_for('last_modified', book_ids)
@@ -100,16 +114,14 @@ def calibre_collections(gui, settings, book_ids):
     out = {}
 
     if source == collmod.SOURCE_TAGS:
-        raw = api.all_field_for('tags', book_ids)
+        raw = read_column(api, 'tags', book_ids)
     elif source == collmod.SOURCE_SERIES:
-        raw = api.all_field_for('series', book_ids)
+        raw = read_column(api, 'series', book_ids)
     elif source == collmod.SOURCE_TEMPLATE:
         return _collections_from_template(gui, settings, book_ids)
     else:
-        column = column_for_field(settings, 'collections')
-        if not column:
-            return {}
-        raw = api.all_field_for(column, book_ids)
+        raw = read_column(api, column_for_field(settings, 'collections'),
+                          book_ids)
 
     for book_id, value in raw.items():
         names = collmod.names_from_value(value)
