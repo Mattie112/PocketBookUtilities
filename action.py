@@ -274,9 +274,30 @@ class PocketBookUtilitiesAction(InterfaceAction):
     def forced_sync(self, mode, fields):
         self.guarded('Sync failed', self._run_sync, mode, None, False, fields)
 
+    def _require_live_columns(self, settings):
+        """Refuse to sync into columns calibre has not loaded yet.
+
+        ``db.create_custom_column`` writes the column immediately, but
+        calibre only picks it up when it restarts. Without this check the
+        first sync after setup would fail part-way through writing.
+        """
+        api = self.gui.current_db.new_api
+        known = set(api.field_metadata.custom_field_keys())
+        missing = sorted({lookup for lookup
+                          in settings.get('columns', {}).values()
+                          if lookup and lookup not in known})
+        if missing:
+            raise PluginError(
+                'calibre has not loaded the new columns yet.',
+                'Restart calibre, then sync again.\n\nWaiting for: %s\n\n'
+                'The columns exist in the library already; calibre only '
+                'picks up new columns when it starts.' % ', '.join(missing))
+
     def _run_sync(self, mode, restrict_to, dry_run, only_fields=None):
         device = self.require_device()
         settings = self.settings()
+        if not dry_run:
+            self._require_live_columns(settings)
         if only_fields is not None:
             settings = dict(settings)
             settings['enabled_fields'] = [
