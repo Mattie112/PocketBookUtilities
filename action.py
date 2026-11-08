@@ -306,8 +306,15 @@ class PocketBookUtilitiesAction(InterfaceAction):
 
         device = self.device
         needs_button = not toolbar.is_reachable(gprefs)
+        try:
+            planned = columns_mod.plan_setup(self.gui.library_view.model().db)
+            preview = columns_mod.describe_plan(planned)
+        except Exception as err:
+            debug('could not work out the column plan: %s' % err)
+            preview = ''
         wizard = SetupWizard(self.gui, device, self._create_columns,
-                             needs_toolbar_button=needs_button)
+                             needs_toolbar_button=needs_button,
+                             column_preview=preview)
         if not wizard.exec():
             return
         if wizard.wants_toolbar_button:

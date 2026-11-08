@@ -235,3 +235,60 @@ class TestAgainstAScratchLibrary(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestPlanMatchesWhatHappens(unittest.TestCase):
+    """The preview shown to the user must be what setup actually does."""
+
+    def setUp(self):
+        self.db, self.path = make_library()
+
+    def tearDown(self):
+        try:
+            self.db.close()
+        except Exception as err:          # pragma: no cover - cleanup only
+            print('could not close scratch library: %s' % err)
+        shutil.rmtree(self.path, ignore_errors=True)
+
+    def test_plan_creates_nothing_by_itself(self):
+        planned = columns.plan_setup(self.db)
+        self.assertEqual(len(planned), len(columns.COLUMN_SPECS))
+        self.assertTrue(all(p.action == 'create' for p in planned))
+        self.assertEqual(columns.current_custom_columns(self.db), {},
+                         'planning must not touch the library')
+
+    def test_plan_then_apply_agree(self):
+        planned = columns.plan_setup(self.db)
+        promised = {p.field: p.lookup for p in planned
+                    if p.action == 'create'}
+        result = columns.ensure_columns(self.db)
+        self.assertEqual(result.created, promised)
+        self.assertEqual(result.failed, {})
+
+    def test_plan_reports_reuse_on_a_second_run(self):
+        columns.ensure_columns(self.db)
+        planned = columns.plan_setup(self.db)
+        self.assertTrue(all(p.action == 'reuse' for p in planned),
+                        [p.describe() for p in planned])
+
+    def test_planned_names_are_distinct(self):
+        self.db.create_custom_column(label='pb_read', name='PB Read',
+                                     datatype='text', is_multiple=False,
+                                     display={})
+        planned = columns.plan_setup(self.db)
+        lookups = [p.lookup for p in planned if p.action == 'create']
+        self.assertEqual(len(lookups), len(set(lookups)))
+        self.assertIn('#pb_read_1', lookups)
+
+    def test_description_names_columns_and_types(self):
+        text = columns.describe_plan(columns.plan_setup(self.db))
+        self.assertIn('Will create 7 column(s)', text)
+        self.assertIn('#pb_read', text)
+        self.assertIn('bool', text)
+        self.assertIn('multiple values', text)
+
+    def test_description_of_a_fully_set_up_library(self):
+        columns.ensure_columns(self.db)
+        text = columns.describe_plan(columns.plan_setup(self.db))
+        self.assertIn('Will reuse 7', text)
+        self.assertNotIn('Will create', text)

@@ -278,12 +278,13 @@ class SetupWizard(QDialog):
     """Shown once per device: explains what the plugin does, then sets it up."""
 
     def __init__(self, parent, device, on_setup_columns,
-                 needs_toolbar_button=False):
+                 needs_toolbar_button=False, column_preview=''):
         QDialog.__init__(self, parent)
         self.device = device
         self.on_setup_columns = on_setup_columns
         self.columns_done = False
         self.needs_toolbar_button = needs_toolbar_button
+        self.column_preview = column_preview
 
         self.setWindowTitle('Set up PocketBook Utilities')
         layout = QVBoxLayout(self)
@@ -302,8 +303,17 @@ class SetupWizard(QDialog):
             'left alone.</p>'
             % (device.device_name or 'PocketBook',
                device.db_path, device.caps.db_version))
-        intro.setMaximumHeight(220)
+        intro.setMaximumHeight(200)
         layout.addWidget(intro)
+
+        if column_preview:
+            preview = QPlainTextEdit(column_preview)
+            preview.setReadOnly(True)
+            preview.setMinimumHeight(150)
+            font = QFont('Consolas')
+            font.setStyleHint(QFont.StyleHint.Monospace)
+            preview.setFont(font)
+            layout.addWidget(preview)
 
         self.result_label = QLabel('')
         self.result_label.setWordWrap(True)

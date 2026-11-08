@@ -236,19 +236,38 @@ def current_custom_columns(db):
     return out
 
 
-def ensure_columns(db, specs=None, reuse_existing=True, only_fields=None):
-    """Create every missing column in one pass.
+@dataclass
+class PlannedColumn:
+    """One decision the setup step would make, before it makes it."""
+    field: str
+    action: str                 # 'reuse' | 'create' | 'error'
+    lookup: str = ''
+    heading: str = ''
+    datatype: str = ''
+    is_multiple: bool = False
+    display: Dict = dc_field(default_factory=dict)
+    problem: str = ''
 
-    *db* is a calibre library database (``gui.library_view.model().db``).
-    Returns a :class:`SetupResult` whose ``mapping`` is field key -> the
-    lookup name that exists now, so a column that had to be created under a
-    suffixed name is still wired up correctly.
+    def describe(self):
+        if self.action == 'reuse':
+            return 'reuse %s' % self.lookup
+        if self.action == 'create':
+            kind = self.datatype + (', multiple' if self.is_multiple else '')
+            return 'create %s (%s)' % (self.lookup, kind)
+        return 'cannot set up: %s' % self.problem
+
+
+def plan_setup(db, specs=None, reuse_existing=True, only_fields=None):
+    """Work out what setup would do, without doing any of it.
+
+    Shared with :func:`ensure_columns` so the preview shown to the user and
+    the work actually carried out can never drift apart.
     """
     specs = specs or COLUMN_SPECS
-    result = SetupResult()
-    current = current_custom_columns(db)
+    current = dict(current_custom_columns(db))
     headings = {meta.get('name') for meta in current.values()}
     claimed = set()
+    planned = []
 
     for spec in specs:
         if only_fields is not None and spec.field not in only_fields:
@@ -257,13 +276,15 @@ def ensure_columns(db, specs=None, reuse_existing=True, only_fields=None):
         if reuse_existing:
             existing = find_reusable(spec, current, claimed)
             if existing:
-                result.reused[spec.field] = existing
                 claimed.add(existing)
+                planned.append(PlannedColumn(field=spec.field,
+                                             action='reuse', lookup=existing))
                 continue
 
         problem = validate(spec)
         if problem:
-            result.failed[spec.field] = problem
+            planned.append(PlannedColumn(field=spec.field, action='error',
+                                         problem=problem))
             continue
 
         label = unused_label(spec.lookup, current)
@@ -271,21 +292,75 @@ def ensure_columns(db, specs=None, reuse_existing=True, only_fields=None):
         display = dict(spec.display)
         display.setdefault('description', spec.description)
 
-        try:
-            db.create_custom_column(label=label, name=heading,
-                                    datatype=spec.datatype,
-                                    is_multiple=spec.is_multiple,
-                                    display=display)
-        except Exception as err:
-            result.failed[spec.field] = '%s: %s' % (type(err).__name__, err)
-            continue
+        planned.append(PlannedColumn(
+            field=spec.field, action='create', lookup='#' + label,
+            heading=heading, datatype=spec.datatype,
+            is_multiple=spec.is_multiple, display=display))
 
-        result.created[spec.field] = '#' + label
-        claimed.add('#' + label)
-        result.needs_restart = True
-        current = current_custom_columns(db)
+        # Pretend it exists, so later specs allocate distinct names.
+        current[label] = {'label': label, 'name': heading,
+                          'datatype': spec.datatype,
+                          'is_multiple': spec.is_multiple}
         headings.add(heading)
+        claimed.add('#' + label)
 
+    return planned
+
+
+def describe_plan(planned):
+    """A short summary of a plan, for the setup dialog."""
+    creates = [p for p in planned if p.action == 'create']
+    reuses = [p for p in planned if p.action == 'reuse']
+    errors = [p for p in planned if p.action == 'error']
+
+    lines = []
+    if creates:
+        lines.append('Will create %d column(s):' % len(creates))
+        for item in creates:
+            kind = item.datatype + (', multiple values'
+                                    if item.is_multiple else '')
+            lines.append('    %-18s %-24s %s'
+                         % (item.lookup, '(' + kind + ')', item.heading))
+    if reuses:
+        lines.append('Will reuse %d existing column(s):' % len(reuses))
+        for item in reuses:
+            lines.append('    %-18s for %s' % (item.lookup, item.field))
+    if errors:
+        lines.append('Cannot set up %d column(s):' % len(errors))
+        for item in errors:
+            lines.append('    %-18s %s' % (item.field, item.problem))
+    if not lines:
+        lines.append('Nothing to do; every column is already in place.')
+    return '\n'.join(lines)
+
+
+def ensure_columns(db, specs=None, reuse_existing=True, only_fields=None):
+    """Create every missing column in one pass.
+
+    *db* is a calibre library database (``gui.library_view.model().db``).
+    Returns a :class:`SetupResult` whose ``mapping`` is field key -> the
+    lookup name that exists now, so a column that had to be created under a
+    suffixed name is still wired up correctly.
+    """
+    result = SetupResult()
+    for item in plan_setup(db, specs, reuse_existing, only_fields):
+        if item.action == 'reuse':
+            result.reused[item.field] = item.lookup
+            continue
+        if item.action == 'error':
+            result.failed[item.field] = item.problem
+            continue
+        try:
+            db.create_custom_column(label=item.lookup.lstrip('#'),
+                                    name=item.heading,
+                                    datatype=item.datatype,
+                                    is_multiple=item.is_multiple,
+                                    display=item.display)
+        except Exception as err:
+            result.failed[item.field] = '%s: %s' % (type(err).__name__, err)
+            continue
+        result.created[item.field] = item.lookup
+        result.needs_restart = True
     return result
 
 
