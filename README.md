@@ -228,9 +228,11 @@ python build.py --version               # the version the zip will report
 CI runs both: the first on plain Python across 3.10 to 3.13, the second on
 a runner with calibre installed, under `xvfb`.
 
-Releases are tagged `vX.Y.Z`. The workflow refuses to build if the tag and
-`PLUGIN_VERSION` in `__init__.py` disagree, so a published zip always
-reports the version its tag promised.
+Releases are tagged `vX.Y.Z`, optionally with a pre-release suffix such as
+`v0.0.1-alpha` or `v1.2.0-rc1`. A suffixed tag is published as a GitHub
+pre-release. calibre plugin versions are tuples of integers, so the suffix
+lives only in the tag; the numeric part has to match `PLUGIN_VERSION` in
+`__init__.py`, and the workflow refuses to build when it doesn't.
 
 ```
 device/     detection, schema introspection, database access, backups

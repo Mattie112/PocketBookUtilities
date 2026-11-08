@@ -8,6 +8,7 @@ the git directory are left out.
 
 import ast
 import os
+import re
 import sys
 import zipfile
 
@@ -83,23 +84,51 @@ def version_string():
     return '.'.join(str(part) for part in plugin_version())
 
 
+#: vX.Y.Z with an optional pre-release suffix: v1.2.0-rc1, v0.0.1-alpha.
+TAG_RE = re.compile(r'^v?(?P<version>\d+\.\d+\.\d+)'
+                    r'(?:[-+.](?P<suffix>[0-9A-Za-z.\-+]+))?$')
+
+
+def parse_tag(tag):
+    """``('0.0.1', 'alpha')`` for ``v0.0.1-alpha``.
+
+    calibre plugin versions are tuples of integers, so a pre-release label
+    cannot live in PLUGIN_VERSION. It belongs to the tag and the GitHub
+    release only; the numeric part is what has to agree.
+    """
+    match = TAG_RE.match((tag or '').strip())
+    if match is None:
+        raise SystemExit(
+            'tag %r is not of the form vX.Y.Z or vX.Y.Z-suffix '
+            '(for example v1.0.0 or v0.0.1-alpha).' % tag)
+    return match.group('version'), match.group('suffix')
+
+
 def check_tag(tag):
     """Fail unless a release tag matches the version in the source."""
+    numeric, suffix = parse_tag(tag)
     wanted = version_string()
-    cleaned = tag.strip()
-    if cleaned.startswith('v'):
-        cleaned = cleaned[1:]
-    if cleaned != wanted:
+    if numeric != wanted:
         raise SystemExit(
-            'tag %r does not match PLUGIN_VERSION %s. Update '
-            'PLUGIN_VERSION in __init__.py, or tag v%s.'
-            % (tag, wanted, wanted))
-    print('tag %s matches PLUGIN_VERSION %s' % (tag, wanted))
+            'tag %r has version %s but PLUGIN_VERSION is %s. Update '
+            'PLUGIN_VERSION in __init__.py to (%s), or tag v%s%s.'
+            % (tag, numeric, wanted, ', '.join(numeric.split('.')),
+               wanted, '-' + suffix if suffix else ''))
+    label = ' (pre-release: %s)' % suffix if suffix else ''
+    print('tag %s matches PLUGIN_VERSION %s%s' % (tag, wanted, label))
+
+
+def is_prerelease(tag):
+    """True when the tag carries a pre-release suffix."""
+    return parse_tag(tag)[1] is not None
 
 
 def main(argv):
     if len(argv) > 2 and argv[1] == '--check-tag':
         check_tag(argv[2])
+        return
+    if len(argv) > 2 and argv[1] == '--is-prerelease':
+        print('true' if is_prerelease(argv[2]) else 'false')
         return
     if len(argv) > 1 and argv[1] == '--version':
         print(version_string())
