@@ -105,6 +105,35 @@ class TestVersioning(unittest.TestCase):
         with self.assertRaises(SystemExit):
             build.check_tag('v99.98.97')
 
+    def test_prerelease_suffixes_are_allowed(self):
+        """calibre versions are int tuples, so alpha lives in the tag."""
+        build = self.build_module()
+        base = build.version_string()
+        for suffix in ('alpha', 'beta', 'rc1', 'rc.2'):
+            build.check_tag('v%s-%s' % (base, suffix))
+            self.assertTrue(build.is_prerelease('v%s-%s' % (base, suffix)),
+                            suffix)
+
+    def test_a_plain_tag_is_not_a_prerelease(self):
+        build = self.build_module()
+        self.assertFalse(build.is_prerelease('v' + build.version_string()))
+
+    def test_a_suffix_does_not_excuse_a_wrong_version(self):
+        build = self.build_module()
+        with self.assertRaises(SystemExit):
+            build.check_tag('v99.98.97-alpha')
+
+    def test_nonsense_tags_are_refused(self):
+        build = self.build_module()
+        for tag in ('', 'release-1', 'v1', 'v1.2', 'latest', 'v1.2.3.4'):
+            with self.assertRaises(SystemExit, msg=tag):
+                build.check_tag(tag)
+
+    def test_parse_splits_version_from_suffix(self):
+        build = self.build_module()
+        self.assertEqual(build.parse_tag('v0.0.1-alpha'), ('0.0.1', 'alpha'))
+        self.assertEqual(build.parse_tag('1.2.3'), ('1.2.3', None))
+
 
 class TestWorkflows(unittest.TestCase):
 

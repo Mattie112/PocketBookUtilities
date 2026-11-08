@@ -10,7 +10,7 @@ must not import Qt or anything from ``calibre.gui2``.
 
 from calibre.customize import InterfaceActionBase
 
-PLUGIN_VERSION = (1, 0, 0)
+PLUGIN_VERSION = (0, 0, 1)
 
 
 class PocketBookUtilities(InterfaceActionBase):

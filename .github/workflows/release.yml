@@ -31,8 +31,12 @@ jobs:
           python-version: '3.12'
 
       - name: Check the tag matches PLUGIN_VERSION
+        id: version
         run: |
-          python build.py --check-tag "${{ github.event.inputs.tag || github.ref_name }}"
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          python build.py --check-tag "$TAG"
+          echo "prerelease=$(python build.py --is-prerelease "$TAG")" \
+            >> "$GITHUB_OUTPUT"
 
       - name: Run the tests that need no calibre
         run: python tests/run_tests.py
@@ -44,6 +48,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
           files: PocketBook Utilities.zip
           generate_release_notes: true
           body: |
