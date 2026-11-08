@@ -176,12 +176,25 @@ class TestWorkflows(unittest.TestCase):
         self.assertIn('calibre-debug -e tests/run_tests.py', text)
         self.assertIn('xvfb-run', text)
 
-    def test_release_checks_the_tag_before_building(self):
+    def test_release_stamps_the_version_before_building(self):
+        """The tag decides the version, so stamping precedes the build."""
         text = self.workflow('release.yml')
-        check = text.index('--check-tag')
+        stamp = text.index('--set-version')
         build = text.index('python build.py\n')
-        self.assertLess(check, build,
-                        'the tag check must come before the build')
+        self.assertLess(stamp, build,
+                        'the version must be stamped before the build')
+
+    def test_release_triggers_on_a_published_release(self):
+        """Drafting a release in the GitHub UI is the whole process."""
+        text = self.workflow('release.yml')
+        self.assertIn('release:', text)
+        self.assertIn('types: [published]', text)
+
+    def test_release_does_not_demand_a_hand_edited_version(self):
+        text = self.workflow('release.yml')
+        self.assertNotIn('--check-tag', text,
+                         'a release must not fail because PLUGIN_VERSION '
+                         'was not bumped by hand first')
 
     def test_release_publishes_the_zip_the_build_produces(self):
         import importlib.util

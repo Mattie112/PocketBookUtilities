@@ -230,19 +230,22 @@ a runner with calibre installed, under `xvfb`.
 
 ### Cutting a release
 
-The version is stated once, in `PLUGIN_VERSION` in `__init__.py`, and the
-release workflow refuses to build when a tag disagrees with it. To release:
+Merge what you want, then on GitHub: **Releases**, *Draft a new release*,
+create a tag such as `v0.0.3` or `v0.0.3-alpha`, Publish. That is all of it.
+The workflow stamps the plugin with the version from the tag, builds the
+zip and attaches it to the release.
+
+A tag ending in a suffix (`-alpha`, `-beta`, `-rc1`) is marked as a
+pre-release. calibre plugin versions are tuples of integers, so the suffix
+exists only in the tag; `v0.0.3-alpha` installs as version `0.0.3`.
+
+`PLUGIN_VERSION` in `__init__.py` is the development default, used when you
+build from a checkout. A release is stamped from its tag, so nothing needs
+editing before tagging. To bump the default anyway:
 
 ```bash
-python build.py --set-version 0.0.2
-git commit -am "Release 0.0.2"
-git tag v0.0.2 && git push --follow-tags
+python build.py --set-version 0.0.3
 ```
-
-Tags may carry a pre-release suffix, `v0.0.2-alpha` or `v1.2.0-rc1`, and
-those are published as GitHub pre-releases. calibre plugin versions are
-tuples of integers, so the suffix lives only in the tag; just the numeric
-part has to match.
 
 ```
 device/     detection, schema introspection, database access, backups
