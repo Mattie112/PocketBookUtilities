@@ -123,12 +123,46 @@ def is_prerelease(tag):
     return parse_tag(tag)[1] is not None
 
 
+def set_version(tag):
+    """Rewrite PLUGIN_VERSION in ``__init__.py`` to match *tag*.
+
+    Keeps the source as the single place the version is stated, while
+    making a release one command instead of a hand edit that is easy to
+    forget. Only the PLUGIN_VERSION line is touched.
+    """
+    numeric, _suffix = parse_tag(tag)
+    parts = numeric.split('.')
+    replacement = 'PLUGIN_VERSION = (%s)\n' % ', '.join(parts)
+
+    path = os.path.join(HERE, '__init__.py')
+    with open(path, encoding='utf-8') as handle:
+        lines = handle.readlines()
+
+    for index, line in enumerate(lines):
+        if line.startswith('PLUGIN_VERSION'):
+            if line == replacement:
+                print('PLUGIN_VERSION is already %s' % numeric)
+                return
+            lines[index] = replacement
+            break
+    else:
+        raise SystemExit('__init__.py does not define PLUGIN_VERSION')
+
+    with open(path, 'w', encoding='utf-8', newline='\n') as handle:
+        handle.writelines(lines)
+    print('PLUGIN_VERSION set to %s; commit this before tagging %s'
+          % (numeric, tag))
+
+
 def main(argv):
     if len(argv) > 2 and argv[1] == '--check-tag':
         check_tag(argv[2])
         return
     if len(argv) > 2 and argv[1] == '--is-prerelease':
         print('true' if is_prerelease(argv[2]) else 'false')
+        return
+    if len(argv) > 2 and argv[1] == '--set-version':
+        set_version(argv[2])
         return
     if len(argv) > 1 and argv[1] == '--version':
         print(version_string())

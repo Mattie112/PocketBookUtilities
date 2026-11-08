@@ -129,6 +129,33 @@ class TestVersioning(unittest.TestCase):
             with self.assertRaises(SystemExit, msg=tag):
                 build.check_tag(tag)
 
+    def test_set_version_rewrites_only_that_line(self):
+        import shutil, tempfile
+        work = tempfile.mkdtemp(prefix='pbu-ver-')
+        self.addCleanup(shutil.rmtree, work, True)
+        shutil.copy(os.path.join(ROOT, '__init__.py'), work)
+
+        build = self.build_module()
+        before = open(os.path.join(ROOT, '__init__.py'),
+                      encoding='utf-8').read().splitlines()
+        original = build.HERE
+        build.HERE = work
+        try:
+            build.set_version('v9.8.7-rc1')
+            after = open(os.path.join(work, '__init__.py'),
+                         encoding='utf-8').read().splitlines()
+        finally:
+            build.HERE = original
+
+        self.assertIn('PLUGIN_VERSION = (9, 8, 7)', after)
+        changed = [(a, b) for a, b in zip(before, after) if a != b]
+        self.assertEqual(len(changed), 1, changed)
+
+    def test_set_version_refuses_a_malformed_tag(self):
+        build = self.build_module()
+        with self.assertRaises(SystemExit):
+            build.set_version('latest')
+
     def test_parse_splits_version_from_suffix(self):
         build = self.build_module()
         self.assertEqual(build.parse_tag('v0.0.1-alpha'), ('0.0.1', 'alpha'))
