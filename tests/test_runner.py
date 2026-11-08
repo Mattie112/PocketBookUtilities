@@ -49,5 +49,39 @@ class TestReadColumn(unittest.TestCase):
         self.assertEqual(read_column(Exploding(), '#pb_read', [1]), {})
 
 
+
+class TestCompletionMessage(unittest.TestCase):
+    """The eject advice belongs only to a run that wrote to the reader."""
+
+    def message(self, *a, **k):
+        from calibre_plugins.pocketbook_utilities.runner import (
+            completion_message)
+        return completion_message(*a, **k)
+
+    def test_calibre_only_sync_does_not_mention_ejecting(self):
+        text = self.message(1111, 0)
+        self.assertIn('1111 value(s) in calibre', text)
+        self.assertNotIn('ject', text)
+
+    def test_device_write_asks_the_user_to_eject(self):
+        text = self.message(0, 5)
+        self.assertIn('5 book(s) on the device', text)
+        self.assertIn('Eject the reader', text)
+
+    def test_auto_eject_says_it_already_happened(self):
+        text = self.message(0, 5, ejected=True)
+        self.assertIn('has been ejected', text)
+        self.assertNotIn('Eject the reader from calibre', text)
+
+    def test_both_sides_are_reported(self):
+        text = self.message(12, 3)
+        self.assertIn('12 value(s) in calibre', text)
+        self.assertIn('3 book(s) on the device', text)
+        self.assertIn('Eject', text)
+
+    def test_nothing_written(self):
+        self.assertEqual(self.message(0, 0), 'Nothing was written.')
+
+
 if __name__ == '__main__':
     unittest.main()

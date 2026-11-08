@@ -2,7 +2,8 @@
 
 from qt.core import (QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout,
                      QLabel, QLineEdit, QPlainTextEdit, QPushButton,
-                     QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
+                     QScrollArea, QSpinBox, Qt, QTabWidget, QVBoxLayout,
+                     QWidget)
 
 from calibre.gui2 import info_dialog
 
@@ -87,8 +88,8 @@ class ConfigWidget(QWidget):
         form = QFormLayout(info)
         for key, value in self.device.summary():
             label = QLabel(value)
-            label.setTextInteractionFlags(label.textInteractionFlags()
-                                          | 0x1)   # selectable by mouse
+            label.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse)
             form.addRow(key + ':', label)
         layout.addWidget(info)
 

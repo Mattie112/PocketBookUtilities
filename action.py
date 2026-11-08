@@ -390,14 +390,14 @@ class PocketBookUtilitiesAction(InterfaceAction):
                 if not dialog.exec() or dry_run:
                     return None
 
-            report = context.apply()
-            if settings.get('eject_after_write') and plan.selected(
-                    _device_side()):
-                self._eject()
-            else:
-                report += ('\n\nEject the reader from calibre before '
-                           'unplugging it, so it keeps these changes.')
-            info_dialog(self.gui, 'Sync finished', report, show=True)
+            calibre_written, device_written = context.apply()
+            ejected = False
+            if device_written and settings.get('eject_after_write'):
+                ejected = self._eject()
+            info_dialog(self.gui, 'Sync finished',
+                        runner.completion_message(calibre_written,
+                                                  device_written, ejected),
+                        show=True)
         finally:
             context.close()
         return None
@@ -407,6 +407,8 @@ class PocketBookUtilitiesAction(InterfaceAction):
             self.gui.device_manager.umount_device()
         except Exception as err:
             debug('could not eject the device: %s' % err)
+            return False
+        return True
 
     def push_metadata(self):
         self.guarded('Could not update device metadata',
@@ -641,11 +643,6 @@ def _explain(submenu, enabled, why):
     action = submenu.menuAction()
     action.setToolTip('' if enabled else why)
     action.setStatusTip('' if enabled else why)
-
-
-def _device_side():
-    from calibre_plugins.pocketbook_utilities.sync.model import Side
-    return Side.DEVICE
 
 
 def _metadata_preview(changes, limit=40):

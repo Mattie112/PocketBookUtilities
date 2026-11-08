@@ -301,20 +301,14 @@ class SyncContext:
 
     # -- applying ------------------------------------------------------
     def apply(self):
-        """Write the selected changes. Returns a short report."""
-        report = []
+        """Write the selected changes.
+
+        Returns ``(values written to calibre, books written to the device)``.
+        """
         calibre_written = self._apply_calibre()
-        if calibre_written:
-            report.append('Updated %d value(s) in calibre.' % calibre_written)
-
         device_written = self._apply_device()
-        if device_written:
-            report.append('Updated %d book(s) on the device.' % device_written)
-
         self._remember()
-        if not report:
-            report.append('Nothing was written.')
-        return '\n'.join(report)
+        return calibre_written, device_written
 
     def _apply_calibre(self):
         changes = self.plan.selected(Side.CALIBRE)
@@ -401,6 +395,32 @@ class SyncContext:
         with SyncStateStore(state_db_path()) as store:
             store.record(self.library, self.device.serial, entries, now_ts())
             store.set_last_sync(self.library, self.device.serial, now_ts())
+
+
+def completion_message(calibre_written, device_written, ejected=False):
+    """What to tell the user after a sync.
+
+    The advice about ejecting belongs only to a run that actually wrote to
+    the reader. A sync that only filled in calibre columns has nothing on
+    the device to lose, and saying otherwise is both noise and wrong.
+    """
+    lines = []
+    if calibre_written:
+        lines.append('Updated %d value(s) in calibre.' % calibre_written)
+    if device_written:
+        lines.append('Updated %d book(s) on the device.' % device_written)
+    if not lines:
+        return 'Nothing was written.'
+
+    if device_written:
+        lines.append('')
+        if ejected:
+            lines.append('The reader has been ejected and is safe to '
+                         'unplug.')
+        else:
+            lines.append('Eject the reader from calibre before unplugging '
+                         'it, so it keeps these changes.')
+    return '\n'.join(lines)
 
 
 def verify_last_write(device):
