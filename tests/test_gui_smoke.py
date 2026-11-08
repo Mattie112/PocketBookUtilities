@@ -7,6 +7,10 @@ to load. Nothing here calls exec(), so no windows appear.
 
 import unittest
 
+from base import needs_calibre_gui
+
+needs_calibre_gui()
+
 from calibre_plugins.pocketbook_utilities.sync.model import (
     BookLink, MatchConfidence, ProposedChange, Side, SyncPlan)
 

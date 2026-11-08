@@ -11,6 +11,10 @@ import shutil
 import tempfile
 import unittest
 
+from base import needs_calibre_gui
+
+needs_calibre_gui()
+
 _app = None
 
 

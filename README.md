@@ -1,11 +1,23 @@
 # PocketBook Utilities
 
+[![CI](https://github.com/Mattie112/PocketBookUtilities/actions/workflows/ci.yml/badge.svg)](https://github.com/Mattie112/PocketBookUtilities/actions/workflows/ci.yml)
+
 A calibre plugin for PocketBook e-readers. It syncs reading status, reading
 position, progress, favourites and collections between the reader and your
 calibre library, and can fix the author information PocketBook sorts by.
 
 Think of it as the PocketBook equivalent of
 [Kobo Utilities](https://github.com/janlarres/kobo-utilities).
+
+> **Written with AI assistance.** Most of this code, and this README, were
+> produced by Claude (Anthropic) working from my direction, and the commits
+> carry a `Co-Authored-By` trailer saying so. It isn't unreviewed output: it
+> was built against a real InkPad 3 Color, every design decision was checked
+> against the device's actual database, and it ships with a test suite that
+> runs on calibre's own Python. Several bugs listed in the history were found
+> by using it rather than by reading it. Treat it as you would any new
+> plugin that touches your library: it takes a backup before every write,
+> but read the Safety section and keep your own backups.
 
 ## What it syncs
 
@@ -20,13 +32,15 @@ Think of it as the PocketBook equivalent of
 | Collections | `bookshelfs` | `#pb_collections` | both ways |
 
 Positions are stored by the reader as a `pbr:` URI around an EPUB CFI, like
-`pbr:/webkit?##epubcfi(/6/62!/4/2/4/1:1)`.
+`pbr:/webkit?##epubcfi(/6/62!/4/2/4/1:1)`. Progress comes from the reader's
+own page counters, so a book sitting at page 144 of 387 of *Dungeon Crawler
+Carl* shows up as 37%.
 
 There are a few extras:
 
 * **Fix titles, authors and series on the device.** PocketBook derives the
   field it sorts authors by from the filename, which can produce entries like
-  `01, Clancy, Tom - Net Force Explorers` filed under "0". This writes
+  `08, Dinniman, Matt - Dungeon Crawler Carl` filed under "0". This writes
   calibre's author sort, series and series number instead.
 * Automatic backups before every write, and a restore dialog.
 * A database integrity check that reports orphan rows without touching them.
@@ -200,13 +214,23 @@ Three firmware details are worth knowing before changing anything:
 
 ## Development
 
-`device/` and `sync/` avoid Qt and the calibre GUI, so they can be tested
-headlessly. Use calibre's bundled Python:
+`device/` and `sync/` avoid Qt and the calibre GUI on purpose, so most of
+the suite runs under any Python. The tests that do need calibre skip
+themselves when it is absent.
 
 ```bash
-calibre-debug -e tests/run_tests.py     # run the tests
-calibre-debug -e build.py               # build the zip
+python tests/run_tests.py               # 128 tests, no calibre needed
+calibre-debug -e tests/run_tests.py     # all 179, including the dialogs
+python build.py                         # build the zip
+python build.py --version               # the version the zip will report
 ```
+
+CI runs both: the first on plain Python across 3.10 to 3.13, the second on
+a runner with calibre installed, under `xvfb`.
+
+Releases are tagged `vX.Y.Z`. The workflow refuses to build if the tag and
+`PLUGIN_VERSION` in `__init__.py` disagree, so a published zip always
+reports the version its tag promised.
 
 ```
 device/     detection, schema introspection, database access, backups

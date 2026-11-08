@@ -9,6 +9,10 @@ import unittest
 
 from calibre_plugins.pocketbook_utilities import columns
 
+from base import needs_calibre_db
+
+needs_calibre_db()
+
 
 def make_library():
     from calibre.db.legacy import LibraryDatabase

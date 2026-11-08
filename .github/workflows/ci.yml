@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  core:
+    # Everything under device/ and sync/ avoids calibre and Qt on purpose,
+    # so the bulk of the suite runs on a plain Python. The tests that do
+    # need calibre skip themselves here and run in the job below.
+    name: Core tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run the test suite
+        run: python tests/run_tests.py
+
+  calibre:
+    # The GUI and custom-column tests need a real calibre. Installing it is
+    # slower and more fragile than the job above, which is why the two are
+    # separate: a broken calibre download should not hide a code failure.
+    name: Full tests with calibre
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install calibre and its X dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libegl1 libopengl0 libnss3 libxkbcommon-x11-0 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-xinerama0 libxcb-xfixes0 libxdamage1
+          wget -nv -O- https://download.calibre-ebook.com/linux-installer.sh \
+            | sudo sh /dev/stdin
+
+      - name: Report the calibre version
+        run: calibre-debug --version
+
+      - name: Run the full suite
+        run: xvfb-run -a calibre-debug -e tests/run_tests.py
+
+  build:
+    name: Build the plugin zip
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build
+        run: python build.py
+
+      - name: Upload the zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocketbook-utilities-zip
+          path: PocketBook Utilities.zip
+          if-no-files-found: error

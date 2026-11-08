@@ -6,6 +6,10 @@ having read the dialog. The action belongs in the button label.
 
 import unittest
 
+from base import needs_calibre_gui
+
+needs_calibre_gui()
+
 _app = None
 
 

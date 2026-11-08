@@ -1,0 +1,53 @@
+name: Release
+
+# Tag a release with the version the plugin reports, for example:
+#   git tag v1.0.1 && git push origin v1.0.1
+# The build refuses to run if the tag and PLUGIN_VERSION disagree, so the
+# zip someone downloads always reports the version they expected.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build, for example v1.0.1'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check the tag matches PLUGIN_VERSION
+        run: |
+          python build.py --check-tag "${{ github.event.inputs.tag || github.ref_name }}"
+
+      - name: Run the tests that need no calibre
+        run: python tests/run_tests.py
+
+      - name: Build the plugin zip
+        run: python build.py
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: PocketBook Utilities.zip
+          generate_release_notes: true
+          body: |
+            Install in calibre with Preferences, Plugins,
+            *Load plugin from file*, then restart calibre.
+
+            See the README for first-run steps and device compatibility.

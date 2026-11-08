@@ -1,4 +1,11 @@
-"""Shared test scaffolding."""
+"""Shared test scaffolding.
+
+Most of the suite needs nothing but the standard library: everything under
+``device/`` and ``sync/`` is deliberately free of calibre and Qt imports, so
+it runs under any Python. The tests that do need calibre say so, and skip
+themselves when it is not importable. That lets CI run the bulk of the suite
+cheaply and the rest only where calibre is installed.
+"""
 
 import os
 import shutil
@@ -8,6 +15,34 @@ import unittest
 import make_fixture
 
 REAL_DUMP = r'C:\temp\pocketbook'
+
+
+def _can_import(name):
+    import importlib
+    try:
+        importlib.import_module(name)
+    except Exception:
+        return False
+    return True
+
+
+#: calibre's library database, needed to create real custom columns.
+HAVE_CALIBRE_DB = _can_import('calibre.db.legacy')
+
+#: Qt plus calibre's GUI layer, needed to build dialogs.
+HAVE_CALIBRE_GUI = HAVE_CALIBRE_DB and _can_import('qt.core')
+
+
+def needs_calibre_db():
+    """Raise at module level to skip a whole module."""
+    if not HAVE_CALIBRE_DB:
+        raise unittest.SkipTest('needs calibre (run with calibre-debug -e)')
+
+
+def needs_calibre_gui():
+    if not HAVE_CALIBRE_GUI:
+        raise unittest.SkipTest('needs calibre with Qt '
+                                '(run with calibre-debug -e)')
 
 
 def real_dump_available():
