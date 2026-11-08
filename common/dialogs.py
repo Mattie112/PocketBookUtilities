@@ -10,7 +10,8 @@ import datetime
 from qt.core import (
     QAbstractItemView, QApplication, QCheckBox, QDialog, QDialogButtonBox,
     QFont, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QPlainTextEdit,
-    QPushButton, QSize, QSizePolicy, Qt, QTableWidget, QTableWidgetItem,
+    QMessageBox, QPushButton, QSize, QSizePolicy, Qt, QTableWidget,
+    QTableWidgetItem,
     QTextBrowser, QVBoxLayout, QWidget)
 
 from ..sync.model import Side
@@ -296,15 +297,13 @@ class SetupWizard(QDialog):
             'progress, favourites and collections in step between the reader '
             'and calibre.</p>'
             '<p>It needs a few custom columns to put that information in. '
-            'The button below creates all of them in one go.</p>'
+            '<b>Create columns and continue</b> makes all of them in one '
+            'go, and reuses any it created before. Your own columns are '
+            'left alone.</p>'
             % (device.device_name or 'PocketBook',
                device.db_path, device.caps.db_version))
         intro.setMaximumHeight(220)
         layout.addWidget(intro)
-
-        self.setup_button = QPushButton('⚙  Set up columns')
-        self.setup_button.clicked.connect(self._setup_columns)
-        layout.addWidget(self.setup_button)
 
         self.result_label = QLabel('')
         self.result_label.setWordWrap(True)
@@ -331,18 +330,36 @@ class SetupWizard(QDialog):
         layout.addWidget(self.dry_run_box)
 
         layout.addStretch(1)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
-                                   | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
+
+        # The action lives in the button rather than in a separate control
+        # above it, so nobody has to read the dialog to work out what OK
+        # will do.
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        self.create_button = buttons.addButton(
+            'Create columns and continue',
+            QDialogButtonBox.ButtonRole.AcceptRole)
+        self.skip_button = buttons.addButton(
+            'Continue without creating columns',
+            QDialogButtonBox.ButtonRole.AcceptRole)
+        self.create_button.setDefault(True)
+        self.create_button.setToolTip(
+            'Creates every custom column the plugin needs, reusing any it '
+            'already made before. Your other columns are left alone.')
+        self.skip_button.setToolTip(
+            'Use this if you want to map the fields onto columns yourself, '
+            'on the Columns tab of the plugin settings.')
+        self.create_button.clicked.connect(self._create_and_accept)
+        self.skip_button.clicked.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-        self.resize(QSize(620, 480))
+        self.resize(QSize(620, 440))
 
-    def _setup_columns(self):
+    def _create_and_accept(self):
         text = self.on_setup_columns()
-        self.result_label.setText(text)
         self.columns_done = True
-        self.setup_button.setEnabled(False)
+        self.result_label.setText(text)
+        QMessageBox.information(self, 'Column setup', text)
+        self.accept()
 
     @property
     def wants_toolbar_button(self):
