@@ -43,11 +43,51 @@ class TestSnapshot(FixtureTestCase):
                 'SELECT title FROM books_impl WHERE id = 1').fetchone()[0]
         self.assertEqual(title, 'Changed In WAL')
 
-    def test_ro_uri_handles_windows_paths_and_spaces(self):
+    def test_ro_uri_opens_a_path_containing_spaces(self):
+        """The requirement is that SQLite can open what we build.
+
+        Asserting the exact string only tested Windows semantics, which is
+        why this failed on a Linux CI runner: a Windows path is not a path
+        at all there. Opening a real file works on both.
+        """
+        folder = os.path.join(self.tmp, 'a folder with spaces')
+        os.makedirs(folder)
+        path = os.path.join(folder, 'probe.db')
+        conn = sqlite3.connect(path)
+        conn.execute('CREATE TABLE t (x)')
+        conn.execute('INSERT INTO t VALUES (42)')
+        conn.commit()
+        conn.close()
+
+        ro = sqlite3.connect(dbmod.ro_uri(path), uri=True)
+        self.addCleanup(ro.close)
+        self.assertEqual(ro.execute('SELECT x FROM t').fetchone()[0], 42)
+
+    def test_ro_uri_really_is_read_only(self):
+        path = os.path.join(self.tmp, 'probe2.db')
+        conn = sqlite3.connect(path)
+        conn.execute('CREATE TABLE t (x)')
+        conn.commit()
+        conn.close()
+
+        ro = sqlite3.connect(dbmod.ro_uri(path), uri=True)
+        self.addCleanup(ro.close)
+        with self.assertRaises(sqlite3.OperationalError):
+            ro.execute('INSERT INTO t VALUES (1)')
+
+    def test_ro_uri_is_a_well_formed_file_uri(self):
+        uri = dbmod.ro_uri(os.path.join(self.tmp, 'x.db'))
+        self.assertTrue(uri.startswith('file:'), uri)
+        self.assertTrue(uri.endswith('?mode=ro'), uri)
+        self.assertNotIn('\\', uri)
+        self.assertNotIn(' ', uri)
+
+    @unittest.skipUnless(os.name == 'nt', 'drive letters are Windows only')
+    def test_windows_drive_letters_get_a_leading_slash(self):
         uri = dbmod.ro_uri(r'C:\Program Files\x\y.db')
-        self.assertTrue(uri.startswith('file:/C%3A/Program%20Files/')
-                        or uri.startswith('file:/C:/Program%20Files/'))
-        self.assertTrue(uri.endswith('?mode=ro'))
+        self.assertTrue(uri.startswith('file:/C%3A/')
+                        or uri.startswith('file:/C:/'), uri)
+        self.assertIn('Program%20Files', uri)
 
 
 class TestWriteTransaction(FixtureTestCase):
