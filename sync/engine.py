@@ -198,6 +198,14 @@ def build_plan(inputs, caps, enabled_fields=None, mode=Mode.MERGE,
                 old_value = raw_device
                 target = plan.device_changes
 
+            # Shown to the user in the same form whichever way it is going:
+            # the device stores a bool as 1 or 0, which is not what anyone
+            # wants to read in a review list.
+            source_c, target_c = ((dev_c, cal_c) if side is Side.DEVICE
+                                  else (cal_c, dev_c))
+            display_old = spec.to_calibre(source_c)
+            display_new = spec.to_calibre(target_c)
+
             selected = True
             if trust_floor is not None and link.confidence < trust_floor:
                 selected = False
@@ -205,7 +213,8 @@ def build_plan(inputs, caps, enabled_fields=None, mode=Mode.MERGE,
             target.append(ProposedChange(
                 link=link, field=spec.key, direction=side,
                 old=old_value, new=new_value, reason=reason,
-                selected=selected))
+                selected=selected,
+                display_old=display_old, display_new=display_new))
 
     plan.stats = counts
     debug('plan: %s' % plan.summary())

@@ -444,3 +444,55 @@ class TestStateStore(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestDisplayValues(EngineTestCase):
+    """What the review list shows must read the same in both directions.
+
+    A favourite being sent to the device showed "No -> 1", because `new`
+    holds whatever the target side stores and the device stores a bool as
+    an integer.
+    """
+
+    def test_a_bool_sent_to_the_device_reads_as_yes_and_no(self):
+        """Marking a book favourite in calibre, exactly as a user would."""
+        conn, caps, inputs = self.inputs()
+        link = [l for l in inputs.links if l.device_book_id == 1][0]
+        inputs.links = [link]
+        inputs.calibre_values = {link.calibre_id: {'favourite': True}}
+        # Only calibre moved since the last sync, so this goes to the device.
+        inputs.prior = {(link.calibre_id, 'favourite'): (False, False)}
+
+        plan = engine.build_plan(inputs, caps, enabled_fields={'favourite'})
+        self.assertEqual(len(plan.device_changes), 1, plan.summary())
+        change = plan.device_changes[0]
+
+        self.assertEqual(change.new, 1, 'the device still gets an integer')
+        self.assertIs(change.display_new, True)
+        self.assertIs(change.display_old, False)
+
+    def test_a_bool_loaded_into_calibre_also_reads_as_yes_and_no(self):
+        conn, caps, inputs = self.inputs()
+        link = [l for l in inputs.links if l.device_book_id == 3][0]
+        inputs.links = [link]
+        plan = engine.build_plan(inputs, caps, enabled_fields={'favourite'})
+        change = plan.calibre_changes[0]
+        self.assertIs(change.display_new, True)
+
+    def test_dates_are_shown_as_dates_not_timestamps(self):
+        import datetime
+        conn, caps, inputs = self.inputs()
+        plan = engine.build_plan(inputs, caps, enabled_fields={'last_read'})
+        change = plan.calibre_changes[0]
+        self.assertIsInstance(change.display_new, datetime.datetime)
+
+    def test_display_defaults_to_the_stored_value(self):
+        from calibre_plugins.pocketbook_utilities.sync.model import (
+            BookLink, MatchConfidence, ProposedChange, Side)
+        link = BookLink(calibre_id=1, device_book_id=1, lpath='', 
+                        device_path='', confidence=MatchConfidence.EXACT_PATH)
+        change = ProposedChange(link=link, field='read',
+                                direction=Side.DEVICE, old=0, new=1,
+                                reason='test')
+        self.assertEqual(change.display_old, 0)
+        self.assertEqual(change.display_new, 1)

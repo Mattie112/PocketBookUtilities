@@ -234,10 +234,12 @@ class ChangeReviewDialog(QDialog):
                          if change.direction is Side.CALIBRE
                          else 'calibre → device')
             self.table.setItem(row, DIR_COL, QTableWidgetItem(direction))
-            self.table.setItem(row, OLD_COL,
-                               QTableWidgetItem(format_value(change.old)))
-            self.table.setItem(row, NEW_COL,
-                               QTableWidgetItem(format_value(change.new)))
+            self.table.setItem(
+                row, OLD_COL, QTableWidgetItem(format_value(
+                    change.display_old)))
+            self.table.setItem(
+                row, NEW_COL, QTableWidgetItem(format_value(
+                    change.display_new)))
 
             why = QTableWidgetItem(change.reason)
             if 'newer' in change.reason or 'same time' in change.reason:

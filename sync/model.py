@@ -108,6 +108,17 @@ class ProposedChange:
     new: Any
     reason: str
     selected: bool = True
+    #: What to show the user. ``new`` is whatever the target side stores,
+    #: which for the device means a raw 1 or 0 where a reader expects
+    #: "Yes" or "No". These hold the human form for both sides.
+    display_old: Any = None
+    display_new: Any = None
+
+    def __post_init__(self):
+        if self.display_old is None:
+            self.display_old = self.old
+        if self.display_new is None:
+            self.display_new = self.new
 
     @property
     def confidence(self):
