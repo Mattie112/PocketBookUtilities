@@ -48,7 +48,13 @@ There are a few extras:
 
 ## Compatibility
 
-Tested on a PocketBook InkPad 3 Color, library schema version 39.
+Tested on a PocketBook InkPad 3 Color, library schema version 39: reading
+status, dates, progress and positions synced both ways across a 473-book
+library, and collections created, shared between books, removed and
+re-added. Writes were confirmed to survive disconnecting the reader.
+
+Pushing titles and authors to the device is the one feature not yet used in
+anger.
 
 It should work on any PocketBook whose firmware keeps its library in
 `system/explorer-3/explorer-3.db`, which covers firmware 5.x and 6.x and so
