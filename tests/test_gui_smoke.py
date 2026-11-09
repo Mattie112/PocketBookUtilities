@@ -123,6 +123,36 @@ class TestReviewDialog(unittest.TestCase):
                   for row in range(self.dialog.table.rowCount())]
         self.assertEqual(titles, sorted(titles, key=str.casefold))
 
+    def test_fields_follow_the_registry_order_not_the_alphabet(self):
+        """Read status before Read date, not the other way round."""
+        from calibre_plugins.pocketbook_utilities.action import FIELD_LABELS
+        from calibre_plugins.pocketbook_utilities.common.dialogs import (
+            ChangeReviewDialog)
+        from calibre_plugins.pocketbook_utilities.sync.model import (
+            BookLink, MatchConfidence, ProposedChange, Side, SyncPlan)
+
+        link = BookLink(calibre_id=1, device_book_id=10, lpath='a',
+                        device_path='a', title='One Book',
+                        confidence=MatchConfidence.EXACT_PATH)
+        plan = SyncPlan()
+        # Deliberately added in an order that alphabetises differently.
+        for field in ('collections', 'read_date', 'favourite', 'read',
+                      'position', 'progress', 'last_read'):
+            plan.calibre_changes.append(
+                ProposedChange(link=link, field=field,
+                               direction=Side.CALIBRE, old=None, new='x',
+                               reason='test'))
+
+        dialog = ChangeReviewDialog(None, plan, FIELD_LABELS)
+        self.addCleanup(dialog.deleteLater)
+        shown = [c.field for c in dialog.changes]
+
+        self.assertEqual(shown, [k for k in FIELD_LABELS if k in shown])
+        self.assertLess(shown.index('read'), shown.index('read_date'),
+                        'read status should come before its date')
+        self.assertLess(shown.index('read'), shown.index('favourite'))
+        self.assertEqual(shown[-1], 'collections')
+
     def test_selection_survives_re_sorting(self):
         """Tick boxes must follow their row when the user re-sorts."""
         from qt.core import Qt
