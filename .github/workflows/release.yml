@@ -1,17 +1,21 @@
 name: Release
 
-# Tag a release with the version the plugin reports, for example:
-#   git tag v1.0.1 && git push origin v1.0.1
-# The build refuses to run if the tag and PLUGIN_VERSION disagree, so the
-# zip someone downloads always reports the version they expected.
+# Publish a release on GitHub (Releases, "Draft a new release", create a tag
+# like v0.0.3 or v0.0.3-alpha, Publish). That is the whole process: this
+# workflow stamps the plugin with the version from the tag, builds the zip
+# and attaches it to the release.
+#
+# PLUGIN_VERSION in __init__.py is the development default. A release is
+# stamped from its tag, so the tag is what decides the published version and
+# there is nothing to edit beforehand.
 
 on:
-  push:
-    tags: ['v*']
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to build, for example v1.0.1'
+        description: 'Tag to build, for example v0.0.3-alpha'
         required: true
 
 permissions:
@@ -19,24 +23,24 @@ permissions:
 
 jobs:
   release:
-    name: Build and publish
+    name: Build and attach the plugin zip
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Check the tag matches PLUGIN_VERSION
+      - name: Stamp the version from the tag
         id: version
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          python build.py --check-tag "$TAG"
+          TAG="${{ github.event.inputs.tag || github.event.release.tag_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "prerelease=$(python build.py --is-prerelease "$TAG")" \
             >> "$GITHUB_OUTPUT"
+          python build.py --set-version "$TAG"
+          python build.py --version
 
       - name: Run the tests that need no calibre
         run: python tests/run_tests.py
@@ -44,15 +48,10 @@ jobs:
       - name: Build the plugin zip
         run: python build.py
 
-      - name: Publish the release
+      - name: Attach the zip to the release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ steps.version.outputs.tag }}
           prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
           files: PocketBook Utilities.zip
-          generate_release_notes: true
-          body: |
-            Install in calibre with Preferences, Plugins,
-            *Load plugin from file*, then restart calibre.
-
-            See the README for first-run steps and device compatibility.
+          fail_on_unmatched_files: true
