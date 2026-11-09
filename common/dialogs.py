@@ -131,9 +131,18 @@ class ChangeReviewDialog(QDialog):
         # Sorted by book, then by field, so a book's changes stay together
         # and the order is something the reader can predict. Clicking a
         # column header re-sorts.
+        #
+        # Fields follow the order of *field_labels* rather than their
+        # alphabet, so a book reads status, then dates, then progress and
+        # position, then collections. Sorting the labels instead produced
+        # "Read date, Favourite, Read status", which is an order nobody
+        # thinks in.
+        order = {key: index for index, key in enumerate(field_labels)}
+        last = len(order)
         self.changes = sorted(
             list(plan.calibre_changes) + list(plan.device_changes),
             key=lambda c: ((c.link.title or '').casefold(),
+                           order.get(c.field, last),
                            field_labels.get(c.field, c.field)))
 
         self.setWindowTitle(title)
