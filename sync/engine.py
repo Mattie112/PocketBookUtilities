@@ -64,17 +64,37 @@ def _describe_ts(timestamp):
 
 def decide(spec, dev_c, cal_c, prior_dev, prior_cal, dev_ts, cal_ts,
            mode=Mode.MERGE, skew=DEFAULT_SKEW, allow_clear=False):
-    """Which side to write, or ``(SKIP, reason)``, or ``None`` for no change."""
+    """Which side to write, or ``(SKIP, reason)``, or ``None`` for no change.
+
+    Whatever route the decision takes, a side is never written an empty
+    value over a filled one unless *allow_clear* says so. That guard used to
+    sit only on the forced paths, so an ordinary merge would happily carry a
+    cleared calibre column onto the device and wipe a reading position --
+    exactly what the option exists to prevent.
+    """
+    outcome = _direction(spec, dev_c, cal_c, prior_dev, prior_cal,
+                         dev_ts, cal_ts, mode, skew)
+    if outcome is None or outcome[0] is SKIP:
+        return outcome
+
+    side = outcome[0]
+    source = cal_c if side is Side.DEVICE else dev_c
+    if source is None and not allow_clear:
+        return SKIP, ('would clear the value on the %s; turn on "let an '
+                      'empty value overwrite a filled one" if that is what '
+                      'you want' % side.label)
+    return outcome
+
+
+def _direction(spec, dev_c, cal_c, prior_dev, prior_cal, dev_ts, cal_ts,
+               mode, skew):
+    """Which side the values alone point at, before the clearing guard."""
     if dev_c == cal_c:
         return None
 
     if mode is Mode.FORCE_SEND:
-        if cal_c is None and not allow_clear:
-            return SKIP, 'calibre has no value and clearing is off'
         return Side.DEVICE, 'forced send to device'
     if mode is Mode.FORCE_LOAD:
-        if dev_c is None and not allow_clear:
-            return SKIP, 'the device has no value and clearing is off'
         return Side.CALIBRE, 'forced load from device'
 
     dev_changed = (prior_dev is UNKNOWN

@@ -134,6 +134,88 @@ class TestDecide(unittest.TestCase):
         self.assertIs(side, Side.DEVICE)
 
 
+class TestClearingIsGuardedEverywhere(unittest.TestCase):
+    """An empty value must never overwrite a filled one by default.
+
+    The guard once sat only on the forced paths, so a column cleared in
+    calibre was treated as an ordinary edit and carried onto the device,
+    wiping reading positions. Every route out of decide() is checked here.
+    """
+
+    spec = fields.BY_KEY['position']
+    POSITION = 'pbr:/webkit?##epubcfi(/6/62!/4/2/4/1:1)'
+
+    def decide(self, dev, cal, **kw):
+        return engine.decide(self.spec, self.spec.canonical(dev),
+                             self.spec.canonical(cal),
+                             kw.pop('prior_dev', UNKNOWN),
+                             kw.pop('prior_cal', UNKNOWN),
+                             kw.pop('dev_ts', None),
+                             kw.pop('cal_ts', None), **kw)
+
+    def test_a_cleared_calibre_column_does_not_wipe_the_device(self):
+        """The exact case: the column was cleared, the device still has it."""
+        side, reason = self.decide(self.POSITION, None,
+                                   prior_dev=self.POSITION,
+                                   prior_cal=self.POSITION)
+        self.assertEqual(side, engine.SKIP)
+        self.assertIn('would clear', reason)
+        self.assertIn('device', reason)
+
+    def test_the_same_case_is_allowed_when_asked_for(self):
+        side, _ = self.decide(self.POSITION, None, prior_dev=self.POSITION,
+                              prior_cal=self.POSITION, allow_clear=True)
+        self.assertIs(side, Side.DEVICE)
+
+    def test_a_cleared_device_value_does_not_wipe_calibre(self):
+        side, reason = self.decide(None, self.POSITION,
+                                   prior_dev=self.POSITION,
+                                   prior_cal=self.POSITION)
+        self.assertEqual(side, engine.SKIP)
+        self.assertIn('calibre', reason)
+
+    def test_when_both_moved_the_side_with_a_value_wins(self):
+        """The conflict path fills rather than clears, whatever the dates.
+
+        Both sides changed and one is now empty. Even with timestamps that
+        would favour the empty side, the value is copied rather than the
+        emptiness, so nothing has to be blocked here.
+        """
+        side, reason = self.decide(self.POSITION, None, prior_dev=None,
+                                   prior_cal=self.POSITION,
+                                   dev_ts=1000, cal_ts=9000)
+        self.assertIs(side, Side.CALIBRE)
+        self.assertIn('only the device has a value', reason)
+
+        side, reason = self.decide(None, self.POSITION, prior_dev=self.POSITION,
+                                   prior_cal=None, dev_ts=9000, cal_ts=1000)
+        self.assertIs(side, Side.DEVICE)
+        self.assertIn('only calibre has a value', reason)
+
+    def test_filling_an_empty_side_is_never_blocked(self):
+        side, _ = self.decide(self.POSITION, None, prior_dev=None,
+                              prior_cal=None)
+        self.assertIs(side, Side.CALIBRE)
+        side, _ = self.decide(None, self.POSITION, prior_dev=None,
+                              prior_cal=None)
+        self.assertIs(side, Side.DEVICE)
+
+    def test_a_real_change_still_goes_through(self):
+        other = 'pbr:/webkit?##epubcfi(/6/99!/4/2)'
+        side, _ = self.decide(self.POSITION, other,
+                              prior_dev=self.POSITION,
+                              prior_cal=self.POSITION)
+        self.assertIs(side, Side.DEVICE)
+
+    def test_read_status_false_is_a_value_not_a_clear(self):
+        """False means "not read"; only None is absence."""
+        read = fields.BY_KEY['read']
+        side, _ = engine.decide(read, read.canonical(True),
+                                read.canonical(False), True, True,
+                                None, None)
+        self.assertIs(side, Side.DEVICE)
+
+
 class EngineTestCase(FixtureTestCase):
     """A full read of the fixture, wired up the way the action layer does."""
 
