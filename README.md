@@ -38,10 +38,17 @@ Carl* shows up as 37%.
 
 There are a few extras:
 
-* **Fix titles, authors and series on the device.** PocketBook derives the
-  field it sorts authors by from the filename, which can produce entries like
-  `08, Dinniman, Matt - Dungeon Crawler Carl` filed under "0". This writes
-  calibre's author sort, series and series number instead.
+* **Push titles, authors and series to the device.** PocketBook fills in
+  the fields it sorts and groups by from the filename, which calibre
+  generated from the book's metadata when it sent the file. This rewrites
+  them from what calibre holds now.
+
+  Worth being clear about what that does and does not fix. If the reader
+  files a book oddly, the cause is usually the metadata in calibre, and
+  this will faithfully push the same oddity back. What it is actually for
+  is the case where the two have diverged: metadata corrected in calibre
+  after the book was sent, or a book that reached the device some other
+  way. It saves deleting and re-sending the file.
 * Automatic backups before every write, and a restore dialog.
 * A database integrity check that reports orphan rows without touching them.
 * A list of books on the device that aren't in your library.
