@@ -53,6 +53,8 @@ class DeviceFileRow:
     title: Optional[str] = None
     author: Optional[str] = None
     firstauthor: Optional[str] = None
+    first_author_letter: Optional[str] = None
+    sort_title: Optional[str] = None
     series: Optional[str] = None
     numinseries: Optional[int] = None
     relpath: str = ''

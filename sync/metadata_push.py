@@ -87,7 +87,7 @@ def build_metadata_changes(links, device_rows, calibre_metadata, caps,
                 if caps.has_sort_title:
                     columns['sort_title'] = meta.get('title_sort') \
                         or meta['title']
-                    old['sort_title'] = None
+                    old['sort_title'] = row.sort_title
 
         if push_author:
             display = meta.get('authors') or ''
@@ -100,7 +100,7 @@ def build_metadata_changes(links, device_rows, calibre_metadata, caps,
                 old['firstauthor'] = row.firstauthor
                 if 'first_author_letter' in caps.cols.get('books_impl', ()):
                     columns['first_author_letter'] = first_letter(sort)
-                    old['first_author_letter'] = None
+                    old['first_author_letter'] = row.first_author_letter
 
         if push_series and caps.has_series:
             series = meta.get('series') or None

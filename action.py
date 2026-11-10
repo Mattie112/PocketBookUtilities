@@ -426,7 +426,9 @@ class PocketBookUtilitiesAction(InterfaceAction):
             ids = [link.calibre_id for link in context.inputs.links]
             meta = {}
             titles = api.all_field_for('title', ids)
-            sorts = api.all_field_for('title_sort', ids)
+            # calibre's fetchable name for the title sort is 'sort';
+            # 'title_sort' appears in field_metadata but raises here.
+            sorts = api.all_field_for('sort', ids)
             authors = api.all_field_for('authors', ids)
             author_sorts = api.all_field_for('author_sort', ids)
             series = api.all_field_for('series', ids)

@@ -140,3 +140,39 @@ class TestApplying(MetadataTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestThePreviewTellsTheTruth(MetadataTestCase):
+    """The preview is the only safeguard for this write, so it must be real.
+
+    old['first_author_letter'] and old['sort_title'] were hardcoded to None,
+    so the dialog showed "None -> C" whatever the device actually held.
+    """
+
+    def test_old_values_come_from_the_device(self):
+        caps, index = self.load()
+        row = index.by_book_id[6]
+        self.assertEqual(row.first_author_letter, '0',
+                         'the device row must carry the real letter')
+        self.assertEqual(row.sort_title, 'Virtual Vandals')
+
+        changes = metadata_push.build_metadata_changes(
+            [self.link(100, 6, 'Virtual Vandals')], index.by_book_id,
+            {100: {'title': 'Virtual Vandals', 'title_sort': 'Virtual Vandals',
+                   'authors': 'Tom Clancy', 'author_sort': 'Clancy, Tom'}},
+            caps, push_title=True, push_author=True, push_series=False)
+
+        change = changes[0]
+        self.assertEqual(change.old['first_author_letter'], '0')
+        self.assertEqual(change.columns['first_author_letter'], 'C')
+
+    def test_a_misfiled_book_is_detectable_from_the_change(self):
+        """What a caller needs to answer "which books does this rescue?"."""
+        caps, index = self.load()
+        changes = metadata_push.build_metadata_changes(
+            [self.link(100, 6)], index.by_book_id,
+            {100: {'authors': 'Tom Clancy', 'author_sort': 'Clancy, Tom'}},
+            caps, push_author=True, push_series=False)
+        misfiled = [c for c in changes
+                    if str(c.old.get('first_author_letter') or '').isdigit()]
+        self.assertEqual(len(misfiled), 1)
