@@ -296,3 +296,48 @@ class TestPlanMatchesWhatHappens(unittest.TestCase):
         text = columns.describe_plan(columns.plan_setup(self.db))
         self.assertIn('Will reuse 7', text)
         self.assertNotIn('Will create', text)
+
+
+class TestCalibreFieldNames(unittest.TestCase):
+    """Field names the plugin passes to all_field_for must be fetchable.
+
+    'title_sort' appears in field_metadata but raises KeyError from
+    all_field_for, so the metadata push crashed on its first real use
+    whatever the user had ticked.
+    """
+
+    FIELDS = ('title', 'sort', 'authors', 'author_sort', 'series',
+              'series_index', 'last_modified', 'tags')
+
+    def setUp(self):
+        self.db, self.path = make_library()
+        from calibre.ebooks.metadata.book.base import Metadata
+        self.book_id = self.db.new_api.add_books(
+            [(Metadata('A Test Book', ['Tom Clancy']), {})])[0][0]
+
+    def tearDown(self):
+        try:
+            self.db.close()
+        except Exception as err:          # pragma: no cover - cleanup only
+            print('could not close scratch library: %s' % err)
+        shutil.rmtree(self.path, ignore_errors=True)
+
+    def test_every_field_the_plugin_reads_is_fetchable(self):
+        api = self.db.new_api
+        for name in self.FIELDS:
+            with self.subTest(field=name):
+                api.all_field_for(name, [self.book_id])
+
+    def test_title_sort_is_spelled_sort(self):
+        api = self.db.new_api
+        self.assertEqual(api.all_field_for('sort', [self.book_id])
+                         [self.book_id], 'Test Book, A')
+        with self.assertRaises(KeyError):
+            api.all_field_for('title_sort', [self.book_id])
+
+    def test_the_action_does_not_ask_for_title_sort(self):
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, 'action.py'), encoding='utf-8') as fh:
+            source = fh.read()
+        self.assertNotIn("all_field_for('title_sort'", source)

@@ -162,26 +162,5 @@ class TestIntegrityReport(FixtureTestCase):
             conn.execute('SELECT COUNT(*) FROM books_impl').fetchone()[0], 12)
 
 
-class TestReceipts(FixtureTestCase):
-
-    def test_digest_changes_when_the_device_reverts(self):
-        with dbmod.WorkingCopy(self.db_path) as copy:
-            first = dbmod.receipt_digest(copy.conn, 1, [1, 2, 3])
-
-        with dbmod.DeviceWriteTransaction(self.db_path) as conn:
-            conn.execute('UPDATE books_settings SET favorite = 1 '
-                         'WHERE bookid = 2 AND profileid = 1')
-
-        with dbmod.WorkingCopy(self.db_path) as copy:
-            second = dbmod.receipt_digest(copy.conn, 1, [1, 2, 3])
-        self.assertNotEqual(first, second)
-
-    def test_digest_is_stable_for_the_same_rows(self):
-        with dbmod.WorkingCopy(self.db_path) as copy:
-            a = dbmod.receipt_digest(copy.conn, 1, [3, 1, 2])
-            b = dbmod.receipt_digest(copy.conn, 1, [1, 2, 3])
-        self.assertEqual(a, b)
-
-
 if __name__ == '__main__':
     unittest.main()

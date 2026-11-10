@@ -1,15 +1,23 @@
-"""Push calibre metadata into ``books_impl`` so the reader sorts correctly.
+"""Push calibre metadata into ``books_impl``.
 
-This exists because of what the reference device actually contains::
+``firstauthor`` is the column the device sorts and groups its author index
+by. The firmware fills it in from the filename, which calibre generated
+from the book's metadata when it sent the file, so the two normally agree.
 
-    title       = 'Net Force Explorers ENG - 01 - Virtual Vandals (1998)'
+Which means this is **not** a fix for a reader that files books oddly. On
+the device this was written against, a dozen books sat under "0"::
+
     author      = 'Clancy, Tom - Net Force Explorers 01'
     firstauthor = '01, Clancy, Tom - Net Force Explorers'
-    first_author_letter = '0'
 
-``firstauthor`` is the column the device sorts and groups by, and here it
-starts with a digit, so the author index on the reader is nonsense. calibre
-already knows the right answer in ``author_sort``.
+and calibre held exactly the same strings: the series had been folded into
+the author name in the library itself. Pushing would have rewritten those
+values with themselves. The repair belonged in calibre.
+
+What this is for is the case where the two sides have genuinely diverged:
+metadata corrected in calibre after the book was sent, or a book that
+arrived on the device some other way. It propagates the current values
+without deleting and re-sending the file.
 
 ``books_impl`` has real ``series`` and ``numinseries`` columns, so series
 information goes there instead of being smuggled into the title.
@@ -79,7 +87,7 @@ def build_metadata_changes(links, device_rows, calibre_metadata, caps,
                 if caps.has_sort_title:
                     columns['sort_title'] = meta.get('title_sort') \
                         or meta['title']
-                    old['sort_title'] = None
+                    old['sort_title'] = row.sort_title
 
         if push_author:
             display = meta.get('authors') or ''
@@ -92,7 +100,7 @@ def build_metadata_changes(links, device_rows, calibre_metadata, caps,
                 old['firstauthor'] = row.firstauthor
                 if 'first_author_letter' in caps.cols.get('books_impl', ()):
                     columns['first_author_letter'] = first_letter(sort)
-                    old['first_author_letter'] = None
+                    old['first_author_letter'] = row.first_author_letter
 
         if push_series and caps.has_series:
             series = meta.get('series') or None
@@ -108,12 +116,20 @@ def build_metadata_changes(links, device_rows, calibre_metadata, caps,
                 columns['numinseries'] = index
                 old['numinseries'] = row.numinseries
 
+        # Drop anything that would write back the value already there.
+        # first_author_letter in particular is derived from firstauthor, so
+        # it rides along unchanged whenever only the rest of the name moves,
+        # and listing 'M' -> 'M' in the preview is pure noise.
+        columns = {name: value for name, value in columns.items()
+                   if value != old.get(name)}
+
         if columns:
             changes.append(MetadataChange(
                 device_book_id=link.device_book_id,
                 calibre_id=link.calibre_id,
                 display_title=link.title or meta.get('title') or '',
-                columns=columns, old=old))
+                columns=columns,
+                old={k: v for k, v in old.items() if k in columns}))
 
     debug('metadata push: %d book(s) would change' % len(changes))
     return changes

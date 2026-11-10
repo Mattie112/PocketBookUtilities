@@ -29,6 +29,8 @@ SELECT fi.book_id   AS book_id,
        bi.title     AS title,
        bi.author    AS author,
        bi.firstauthor AS firstauthor,
+       bi.first_author_letter AS first_author_letter,
+       bi.sort_title AS sort_title,
        bi.series    AS series,
        bi.numinseries AS numinseries
 FROM files fi
@@ -195,6 +197,11 @@ def load_device_index(conn, caps, prefixes):
             title=row['title'],
             author=row['author'],
             firstauthor=row['firstauthor'],
+            first_author_letter=(row['first_author_letter']
+                                 if 'first_author_letter' in row.keys()
+                                 else None),
+            sort_title=(row['sort_title'] if 'sort_title' in row.keys()
+                        else None),
             series=row['series'] if 'series' in row.keys() else None,
             numinseries=(row['numinseries'] if 'numinseries' in row.keys()
                          else None),

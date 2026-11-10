@@ -14,7 +14,8 @@ from calibre_plugins.pocketbook_utilities import runner
 from calibre_plugins.pocketbook_utilities.common.compat import (
     PluginError, debug, set_debug)
 from calibre_plugins.pocketbook_utilities.common.dialogs import (
-    ChangeReviewDialog, SetupWizard, TextReportDialog, show_error)
+    ChangeReviewDialog, MetadataReviewDialog, SetupWizard,
+    TextReportDialog, show_error)
 from calibre_plugins.pocketbook_utilities.device import db as dbmod
 from calibre_plugins.pocketbook_utilities.device.detect import get_device
 from calibre_plugins.pocketbook_utilities.sync.engine import Mode
@@ -426,7 +427,9 @@ class PocketBookUtilitiesAction(InterfaceAction):
             ids = [link.calibre_id for link in context.inputs.links]
             meta = {}
             titles = api.all_field_for('title', ids)
-            sorts = api.all_field_for('title_sort', ids)
+            # calibre's fetchable name for the title sort is 'sort';
+            # 'title_sort' appears in field_metadata but raises here.
+            sorts = api.all_field_for('sort', ids)
             authors = api.all_field_for('authors', ids)
             author_sorts = api.all_field_for('author_sort', ids)
             series = api.all_field_for('series', ids)
@@ -456,21 +459,23 @@ class PocketBookUtilitiesAction(InterfaceAction):
                     'The device already has the right titles and authors.',
                     show=True)
 
-            preview = _metadata_preview(changes)
-            if not question_dialog(
-                    self.gui, 'Update device metadata',
-                    'Update %d book(s) in the device database?'
-                    % len(changes), det_msg=preview):
+            dialog = MetadataReviewDialog(self.gui, changes)
+            if not dialog.exec():
                 return None
+            chosen = dialog.selected_changes()
+            if not chosen:
+                return info_dialog(self.gui, 'Nothing selected',
+                                   'No changes were ticked.', show=True)
 
             runner.make_backup(
                 device,
                 keep=int(config_mod.plugin_prefs().get('backup_keep', 10)))
             with context.copy.write() as conn:
-                written = metadata_push.apply_metadata(conn, changes)
+                written = metadata_push.apply_metadata(conn, chosen)
             info_dialog(self.gui, 'Device metadata updated',
-                        'Updated %d book(s). Eject the reader before '
-                        'unplugging it.' % written, show=True)
+                        'Updated %d book(s).\n\nEject the reader from '
+                        'calibre before unplugging it, so it keeps these '
+                        'changes.' % written, show=True)
         finally:
             context.close()
         return None
@@ -643,16 +648,3 @@ def _explain(submenu, enabled, why):
     action = submenu.menuAction()
     action.setToolTip('' if enabled else why)
     action.setStatusTip('' if enabled else why)
-
-
-def _metadata_preview(changes, limit=40):
-    lines = []
-    for change in changes[:limit]:
-        lines.append(change.display_title)
-        for column in sorted(change.columns):
-            lines.append('    %-20s %r  ->  %r'
-                         % (column, change.old.get(column),
-                            change.columns[column]))
-    if len(changes) > limit:
-        lines.append('... and %d more' % (len(changes) - limit))
-    return '\n'.join(lines)

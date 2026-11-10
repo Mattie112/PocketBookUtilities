@@ -285,6 +285,144 @@ class ChangeReviewDialog(QDialog):
         QDialog.accept(self)
 
 
+META_COLUMNS = ('', 'Book', 'Field', 'From', 'To')
+M_CHECK, M_TITLE, M_FIELD, M_OLD, M_NEW = range(5)
+
+#: Device column -> what to call it in the list.
+FIELD_LABELS_DEVICE = {
+    'title': 'Title',
+    'sort_title': 'Title sort',
+    'author': 'Author',
+    'firstauthor': 'Author sort',
+    'first_author_letter': 'Author index letter',
+    'series': 'Series',
+    'numinseries': 'Series number',
+}
+
+
+class MetadataReviewDialog(QDialog):
+    """Review the metadata push in a table you can read and resize.
+
+    This used to be calibre's question dialog with the whole preview
+    crammed into its details box: fixed size, no wrapping, and all or
+    nothing. Same shape as the sync review now, including per-row choice.
+    """
+
+    def __init__(self, parent, changes, title='Update device metadata'):
+        QDialog.__init__(self, parent)
+        self.changes = sorted(changes,
+                              key=lambda c: (c.display_title or '').casefold())
+        self.rows = []
+        for change in self.changes:
+            for column in sorted(change.columns):
+                self.rows.append((change, column))
+
+        self.setWindowTitle(title)
+        layout = QVBoxLayout(self)
+
+        heading = QLabel('%d book(s) and %d value(s) would change on the '
+                         'device.' % (len(self.changes), len(self.rows)))
+        heading.setWordWrap(True)
+        layout.addWidget(heading)
+
+        note = QLabel('Only the device database is changed; the book files '
+                      'are left alone. A backup is taken first.')
+        note.setStyleSheet('color: palette(mid);')
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        self.table = QTableWidget(len(self.rows), len(META_COLUMNS), self)
+        self.table.setHorizontalHeaderLabels(META_COLUMNS)
+        self.table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.verticalHeader().setVisible(False)
+        self._fill()
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(M_TITLE, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(M_OLD, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(M_NEW, QHeaderView.ResizeMode.Stretch)
+        self.table.resizeColumnToContents(M_CHECK)
+        self.table.setSortingEnabled(True)
+        layout.addWidget(self.table)
+
+        buttons_row = QHBoxLayout()
+        for label, slot in (('Select &all', self.select_all),
+                            ('Select &none', self.select_none)):
+            button = QPushButton(label)
+            button.clicked.connect(slot)
+            buttons_row.addWidget(button)
+        buttons_row.addStretch(1)
+        layout.addLayout(buttons_row)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                                   | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(
+            '&Write to device')
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.resize(QSize(1000, 600))
+
+    def _fill(self):
+        for row, (change, column) in enumerate(self.rows):
+            check = QTableWidgetItem()
+            check.setData(Qt.ItemDataRole.UserRole, row)
+            check.setFlags(Qt.ItemFlag.ItemIsUserCheckable
+                           | Qt.ItemFlag.ItemIsEnabled)
+            check.setCheckState(Qt.CheckState.Checked)
+            self.table.setItem(row, M_CHECK, check)
+            self.table.setItem(row, M_TITLE,
+                               QTableWidgetItem(change.display_title))
+            self.table.setItem(row, M_FIELD, QTableWidgetItem(
+                FIELD_LABELS_DEVICE.get(column, column)))
+            self.table.setItem(row, M_OLD, QTableWidgetItem(
+                format_value(change.old.get(column))))
+            self.table.setItem(row, M_NEW, QTableWidgetItem(
+                format_value(change.columns.get(column))))
+
+    def _items(self):
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, M_CHECK)
+            if item is None:
+                continue
+            index = item.data(Qt.ItemDataRole.UserRole)
+            if index is None or not 0 <= int(index) < len(self.rows):
+                continue
+            yield item, self.rows[int(index)]
+
+    def select_all(self):
+        for item, _row in self._items():
+            item.setCheckState(Qt.CheckState.Checked)
+
+    def select_none(self):
+        for item, _row in self._items():
+            item.setCheckState(Qt.CheckState.Unchecked)
+
+    def selected_changes(self):
+        """The changes, rebuilt from only the ticked rows."""
+        from dataclasses import replace
+
+        keep = {}
+        for item, (change, column) in self._items():
+            if item.checkState() != Qt.CheckState.Checked:
+                continue
+            keep.setdefault(id(change), (change, []))[1].append(column)
+
+        out = []
+        for change, columns in keep.values():
+            if len(columns) == len(change.columns):
+                out.append(change)
+                continue
+            out.append(replace(
+                change,
+                columns={k: v for k, v in change.columns.items()
+                         if k in columns},
+                old={k: v for k, v in change.old.items() if k in columns}))
+        return out
+
+
 class SetupWizard(QDialog):
     """Shown once per device: explains what the plugin does, then sets it up."""
 

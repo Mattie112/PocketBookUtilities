@@ -227,3 +227,75 @@ class TestModulesImport(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestMetadataReviewDialog(unittest.TestCase):
+    """The metadata push used calibre's question dialog with everything
+    crammed into its details box: fixed size, unreadable, all or nothing."""
+
+    def changes(self):
+        from calibre_plugins.pocketbook_utilities.sync.metadata_push import (
+            MetadataChange)
+        return [
+            MetadataChange(device_book_id=1, calibre_id=11,
+                           display_title='Virtual Vandals',
+                           columns={'author': 'Tom Clancy',
+                                    'firstauthor': 'Clancy, Tom',
+                                    'first_author_letter': 'C'},
+                           old={'author': 'Clancy, Tom - NFE 01',
+                                'firstauthor': '01, Clancy, Tom - NFE',
+                                'first_author_letter': '0'}),
+            MetadataChange(device_book_id=2, calibre_id=12,
+                           display_title='Another Book',
+                           columns={'series': 'A Series'},
+                           old={'series': None}),
+        ]
+
+    def build(self):
+        from calibre_plugins.pocketbook_utilities.common.dialogs import (
+            MetadataReviewDialog)
+        dialog = MetadataReviewDialog(None, self.changes())
+        self.addCleanup(dialog.deleteLater)
+        return dialog
+
+    def test_one_row_per_changed_value(self):
+        dialog = self.build()
+        self.assertEqual(dialog.table.rowCount(), 4)
+
+    def test_fields_are_named_not_shown_as_columns(self):
+        dialog = self.build()
+        labels = {dialog.table.item(r, 2).text()
+                  for r in range(dialog.table.rowCount())}
+        self.assertIn('Author sort', labels)
+        self.assertIn('Author index letter', labels)
+        self.assertNotIn('firstauthor', labels)
+
+    def test_everything_is_ticked_to_begin_with(self):
+        dialog = self.build()
+        chosen = dialog.selected_changes()
+        self.assertEqual(len(chosen), 2)
+        self.assertEqual(sum(len(c.columns) for c in chosen), 4)
+
+    def test_unticking_drops_only_that_value(self):
+        from qt.core import Qt
+        dialog = self.build()
+        for row in range(dialog.table.rowCount()):
+            if dialog.table.item(row, 2).text() == 'Author index letter':
+                dialog.table.item(row, 0).setCheckState(
+                    Qt.CheckState.Unchecked)
+        chosen = dialog.selected_changes()
+        first = [c for c in chosen if c.device_book_id == 1][0]
+        self.assertNotIn('first_author_letter', first.columns)
+        self.assertIn('author', first.columns)
+        self.assertNotIn('first_author_letter', first.old)
+
+    def test_select_none_means_nothing_is_written(self):
+        dialog = self.build()
+        dialog.select_none()
+        self.assertEqual(dialog.selected_changes(), [])
+
+    def test_rows_are_sorted_by_book(self):
+        dialog = self.build()
+        titles = [dialog.table.item(r, 1).text()
+                  for r in range(dialog.table.rowCount())]
+        self.assertEqual(titles, sorted(titles, key=str.casefold))
