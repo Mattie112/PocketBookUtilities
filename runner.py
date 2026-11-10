@@ -12,6 +12,7 @@ from .common.compat import PluginError, debug, now_ts
 from .config import (backup_dir, column_for_field, device_settings,
                      library_key, mapped_fields, plugin_prefs, state_db_path)
 from .device import db as dbmod
+from .device import receipt
 from .device.detect import complete_from_db
 from .sync import collections as collmod
 from .sync import engine, identity, metadata_push
@@ -352,18 +353,15 @@ class SyncContext:
         return len({c.link.device_book_id for c in changes})
 
     def _write_receipt(self):
-        ids = engine.touched_device_ids(self.plan)
-        if not ids:
+        expectations = receipt.build(self.plan, self.device.profile_id,
+                                     BY_KEY.get)
+        if not expectations:
             return
-        fresh = dbmod.WorkingCopy(self.device.db_path)
-        try:
-            conn = fresh.open()
-            digest = dbmod.receipt_digest(conn, self.device.profile_id, ids)
-        finally:
-            fresh.close()
         with SyncStateStore(state_db_path()) as store:
             store.set_receipt(self.device.serial, {
-                'digest': digest, 'book_ids': ids, 'when': now_ts(),
+                'version': 2,
+                'expectations': expectations,
+                'when': now_ts(),
                 'profile_id': self.device.profile_id,
             })
 
@@ -431,26 +429,26 @@ def verify_last_write(device):
     ``None`` when there is nothing to check.
     """
     with SyncStateStore(state_db_path()) as store:
-        receipt = store.get_receipt(device.serial)
-    if not receipt or not receipt.get('book_ids'):
+        stored = store.get_receipt(device.serial)
+    if not stored:
+        return None
+
+    expectations = stored.get('expectations')
+    if not expectations:
+        # A receipt from the version that hashed whole rows. It could not
+        # tell reading from reverting, so there is nothing to say.
+        debug('ignoring a receipt with no expectations')
         return None
 
     copy = dbmod.WorkingCopy(device.db_path)
     try:
-        conn = copy.open()
-        digest = dbmod.receipt_digest(conn, receipt.get('profile_id', 1),
-                                      receipt['book_ids'])
+        failures = receipt.verify(copy.open(), expectations)
     finally:
         copy.close()
 
     when = time.strftime('%Y-%m-%d %H:%M',
-                         time.localtime(receipt.get('when', 0)))
-    if digest == receipt.get('digest'):
-        return True, ('The %d change(s) written on %s are still on the device.'
-                      % (len(receipt['book_ids']), when))
-    return False, (
-        'The %d change(s) written on %s are no longer on the device.\n\n'
-        'PocketBook rewrites its library database from memory when the USB '
-        'connection drops, which undoes changes made while it was plugged '
-        'in. Eject the reader from calibre before unplugging it, then sync '
-        'again.' % (len(receipt['book_ids']), when))
+                         time.localtime(stored.get('when', 0)))
+    if not failures:
+        return True, ('All %d change(s) written on %s are still on the '
+                      'device.' % (len(expectations), when))
+    return False, receipt.describe(failures, when)

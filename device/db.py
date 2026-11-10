@@ -15,7 +15,6 @@ The package contains no ``DELETE FROM`` or ``DROP`` statement anywhere; a unit
 test enforces that. Removing a book from a collection is a soft delete.
 """
 
-import hashlib
 import os
 import shutil
 import sqlite3
@@ -221,34 +220,6 @@ def integrity_report(conn, caps):
             continue
         lines.append('  %-48s %d' % (label, count))
     return '\n'.join(lines)
-
-
-# --------------------------------------------------------------------------
-# Write receipts: detect a device that reverted our changes on disconnect.
-# --------------------------------------------------------------------------
-
-RECEIPT_SQL = (
-    'SELECT bookid, completed, completed_ts, favorite, favorite_ts, '
-    'position, position_ts FROM books_settings '
-    'WHERE profileid = ? AND bookid IN (%s) ORDER BY bookid'
-)
-
-
-def receipt_digest(conn, profile_id, book_ids):
-    """A hash of the reading-state rows for *book_ids*.
-
-    Stored after a write and recomputed on the next connect; a mismatch means
-    the reader restored its own copy of the database and our changes are gone.
-    """
-    book_ids = sorted({int(b) for b in book_ids})
-    digest = hashlib.sha1()
-    # Chunked so we never exceed SQLite's host-parameter limit.
-    for start in range(0, len(book_ids), 500):
-        chunk = book_ids[start:start + 500]
-        sql = RECEIPT_SQL % ','.join('?' * len(chunk))
-        for row in conn.execute(sql, [profile_id] + chunk):
-            digest.update(repr(tuple(row)).encode('utf-8'))
-    return digest.hexdigest()
 
 
 def require(condition, message, detail=None):
