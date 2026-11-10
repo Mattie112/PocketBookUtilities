@@ -116,12 +116,20 @@ def build_metadata_changes(links, device_rows, calibre_metadata, caps,
                 columns['numinseries'] = index
                 old['numinseries'] = row.numinseries
 
+        # Drop anything that would write back the value already there.
+        # first_author_letter in particular is derived from firstauthor, so
+        # it rides along unchanged whenever only the rest of the name moves,
+        # and listing 'M' -> 'M' in the preview is pure noise.
+        columns = {name: value for name, value in columns.items()
+                   if value != old.get(name)}
+
         if columns:
             changes.append(MetadataChange(
                 device_book_id=link.device_book_id,
                 calibre_id=link.calibre_id,
                 display_title=link.title or meta.get('title') or '',
-                columns=columns, old=old))
+                columns=columns,
+                old={k: v for k, v in old.items() if k in columns}))
 
     debug('metadata push: %d book(s) would change' % len(changes))
     return changes
