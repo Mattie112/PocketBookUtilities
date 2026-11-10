@@ -243,3 +243,101 @@ class TestAgainstRealDump(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestOlderBooksImpl(IdentityTestCase):
+    """Columns not every firmware has must not take the whole sync down."""
+
+    OPTIONAL = {'first_author_letter', 'sort_title', 'series', 'numinseries'}
+
+    def test_missing_optional_columns_are_not_selected(self):
+        import dataclasses
+        copy = dbmod.WorkingCopy(self.db_path)
+        self.addCleanup(copy.close)
+        conn = copy.open()
+        caps = schema.introspect(conn)
+        cols = dict(caps.cols)
+        cols['books_impl'] = frozenset(cols['books_impl']) - self.OPTIONAL
+        older = dataclasses.replace(caps, cols=cols)
+
+        sql = identity.files_sql(older)
+        for name in self.OPTIONAL:
+            self.assertNotIn('bi.%s' % name, sql)
+
+        index = identity.load_device_index(
+            conn, older, {'main': self.prefix, 'card': self.card_prefix})
+        self.assertTrue(len(index))
+        row = index.rows[0]
+        self.assertIsNone(row.sort_title)
+        self.assertIsNone(row.first_author_letter)
+        self.assertIsNone(row.series)
+
+    def test_present_columns_are_still_read(self):
+        _conn, _caps, index = self.load()
+        self.assertTrue(any(r.first_author_letter for r in index.rows))
+
+
+class TestSingleBookFolder(unittest.TestCase):
+    """Every book in one folder must not make that folder the root."""
+
+    def test_a_known_root_wins_a_tie(self):
+        self.assertTrue(identity._better_root('/mnt/ext1', '/mnt/ext1/Books'))
+        self.assertFalse(identity._better_root('/mnt/ext1/Books',
+                                               '/mnt/ext1'))
+
+    def test_otherwise_the_shorter_root_wins(self):
+        self.assertTrue(identity._better_root('/mnt/int0', '/mnt/int0/Books'))
+        self.assertFalse(identity._better_root('/mnt/int0/Books',
+                                               '/mnt/int0'))
+
+    def test_the_storage_root_is_resolved_not_the_folder(self):
+        import shutil
+        import tempfile
+        prefix = tempfile.mkdtemp(prefix='pbutil-root-')
+        self.addCleanup(shutil.rmtree, prefix, True)
+        os.makedirs(os.path.join(prefix, 'Books'))
+        conn = sqlite3.connect(':memory:')
+        self.addCleanup(conn.close)
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE folders(id INTEGER PRIMARY KEY, '
+                     'storageid INTEGER, name TEXT)')
+        conn.execute("INSERT INTO folders VALUES (1, 1, '/mnt/ext1/Books')")
+        roots = identity.resolve_storage_roots(conn, {'main': prefix})
+        self.assertEqual(roots[1]['root'], '/mnt/ext1')
+
+
+class TestShelvesWithoutSoftDelete(unittest.TestCase):
+    """Firmware with no is_deleted columns must still read and add."""
+
+    def setUp(self):
+        self.conn = sqlite3.connect(':memory:')
+        self.addCleanup(self.conn.close)
+        self.conn.row_factory = sqlite3.Row
+        self.conn.executescript(
+            'CREATE TABLE bookshelfs(id INTEGER PRIMARY KEY AUTOINCREMENT, '
+            'name TEXT, ts INTEGER);'
+            'CREATE TABLE bookshelfs_books(bookshelfid INTEGER, '
+            'bookid INTEGER, ts INTEGER, PRIMARY KEY(bookshelfid, bookid));'
+            "INSERT INTO bookshelfs (name, ts) VALUES ('Old', 1);"
+            'INSERT INTO bookshelfs_books VALUES (1, 7, 1);')
+        self.caps = schema.introspect(self.conn)
+
+    def test_shelves_load(self):
+        self.assertFalse(self.caps.has_shelf_is_deleted)
+        shelves, memberships = identity.load_shelves(self.conn, self.caps)
+        self.assertEqual(shelves[1]['name'], 'Old')
+        self.assertEqual(memberships, {7: {1: 0}})
+
+    def test_adding_works_and_removal_is_declined(self):
+        from calibre_plugins.pocketbook_utilities.sync import (
+            collections as collmod)
+        shelves, memberships = identity.load_shelves(self.conn, self.caps)
+        writer = collmod.ShelfWriter(self.conn, shelves, memberships,
+                                     self.caps)
+        counts = writer.set_for_book(7, ['New'], timestamp=5)
+        self.assertEqual(counts['added'], 1)
+        self.assertEqual(counts['not_removable'], 1,
+                         'a membership must never be erased outright')
+        self.assertEqual(
+            self.conn.execute('SELECT COUNT(*) FROM bookshelfs_books '
+                              'WHERE bookid = 7').fetchone()[0], 2)

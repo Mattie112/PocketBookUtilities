@@ -20,6 +20,7 @@ from calibre_plugins.pocketbook_utilities.device import db as dbmod
 from calibre_plugins.pocketbook_utilities.device.detect import get_device
 from calibre_plugins.pocketbook_utilities.sync.engine import Mode
 from calibre_plugins.pocketbook_utilities.sync.fields import BY_KEY, FIELDS
+from calibre_plugins.pocketbook_utilities.sync.model import MatchConfidence
 
 #: Path inside the plugin zip, as build.py packs it.
 PLUGIN_ICON = 'resources/images/icon.png'
@@ -155,7 +156,7 @@ class PocketBookUtilitiesAction(InterfaceAction):
 
     def _check_previous_write(self):
         try:
-            outcome = runner.verify_last_write(self.device)
+            outcome = runner.verify_last_write(self.device, unattended=True)
         except Exception as err:
             debug('could not verify the previous write: %s' % err)
             return
@@ -163,6 +164,13 @@ class PocketBookUtilitiesAction(InterfaceAction):
             return
         error_dialog(self.gui, 'Changes were undone by the reader',
                      outcome[1], show=True)
+        # Said once. Without this the same dialog comes back on every
+        # connection and every library switch until the next write; the
+        # menu entry still reports it for anyone who asks.
+        try:
+            runner.acknowledge_receipt(self.device)
+        except Exception as err:
+            debug('could not mark the receipt as reported: %s' % err)
 
     # -- menu ----------------------------------------------------------
     def rebuild_menus(self):
@@ -285,11 +293,22 @@ class PocketBookUtilitiesAction(InterfaceAction):
         info_dialog(self.gui, 'Column setup', text, show=True)
 
     def _create_columns(self):
-        """Create the columns and wire the mapping into the settings."""
-        result = columns_mod.ensure_columns_for_gui(self.gui,
-                                                    reuse_existing=True)
+        """Create the columns and wire the mapping into the settings.
+
+        Only fields without a usable column are set up. A field the user
+        pointed at a column of their own on the Columns tab keeps it:
+        replacing the whole mapping with the setup result would quietly
+        move that field onto a new, empty ``#pb_`` column.
+        """
+        needed = self._fields_needing_columns()
+        result = columns_mod.ensure_columns_for_gui(
+            self.gui, reuse_existing=True, only_fields=needed)
         if self.device is not None:
-            values = {'columns': result.mapping}
+            mapping = {field: lookup for field, lookup
+                       in self.settings().get('columns', {}).items()
+                       if field not in needed}
+            mapping.update(result.mapping)
+            values = {'columns': mapping}
             if not result.failed:
                 values['configured'] = True
             self.save(values)
@@ -301,6 +320,15 @@ class PocketBookUtilitiesAction(InterfaceAction):
                      'book list.')
         return text
 
+    def _fields_needing_columns(self):
+        """Fields whose mapped column is missing, or that have none."""
+        mapping = self.settings().get('columns', {})
+        existing = columns_mod.current_custom_columns(
+            self.gui.library_view.model().db)
+        return {spec.field for spec in columns_mod.COLUMN_SPECS
+                if (mapping.get(spec.field) or '').lstrip('#')
+                not in existing}
+
     def run_setup_wizard(self):
         from calibre.gui2 import gprefs
         from calibre_plugins.pocketbook_utilities import toolbar
@@ -308,7 +336,9 @@ class PocketBookUtilitiesAction(InterfaceAction):
         device = self.device
         needs_button = not toolbar.is_reachable(gprefs)
         try:
-            planned = columns_mod.plan_setup(self.gui.library_view.model().db)
+            planned = columns_mod.plan_setup(
+                self.gui.library_view.model().db,
+                only_fields=self._fields_needing_columns())
             preview = columns_mod.describe_plan(planned)
         except Exception as err:
             debug('could not work out the column plan: %s' % err)
@@ -451,7 +481,9 @@ class PocketBookUtilitiesAction(InterfaceAction):
                 push_author=bool(settings.get('push_author', True)),
                 push_series=bool(settings.get('push_series', True)),
                 missing_authors_only=bool(
-                    settings.get('push_missing_authors_only')))
+                    settings.get('push_missing_authors_only')),
+                trust_floor=MatchConfidence(
+                    int(settings.get('trust_floor', 2))))
 
             if not changes:
                 return info_dialog(
