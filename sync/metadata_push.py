@@ -35,6 +35,12 @@ from ..common.compat import debug
 #: Fields the user can push, in the order shown in the preview.
 PUSH_FIELDS = ('title', 'author', 'firstauthor', 'series')
 
+#: Columns computed from another one -> the column they follow. Writing one
+#: half of such a pair leaves the device row contradicting itself, so a
+#: derived column is never chosen separately from its source.
+DERIVED_FROM = {'first_author_letter': 'firstauthor',
+                'sort_title': 'title'}
+
 
 @dataclass(frozen=True)
 class MetadataChange:
@@ -43,6 +49,12 @@ class MetadataChange:
     display_title: str
     columns: dict          # device column -> new value
     old: dict              # device column -> old value
+    #: How the book was matched to the device, for the review list.
+    match: str = ''
+    #: False when that match is below what the user trusts. Such a change
+    #: is still listed, but starts unticked: overwriting a title and author
+    #: on the strength of a shared filename is how the wrong book gets them.
+    trusted: bool = True
 
     @property
     def is_empty(self):
@@ -58,12 +70,14 @@ def first_letter(value):
 
 def build_metadata_changes(links, device_rows, calibre_metadata, caps,
                            push_title=False, push_author=True,
-                           push_series=True, missing_authors_only=False):
+                           push_series=True, missing_authors_only=False,
+                           trust_floor=None):
     """Work out what would change in ``books_impl``.
 
     *calibre_metadata* maps a calibre id to a dict with ``title``,
     ``authors`` (display form), ``author_sort``, ``series`` and
-    ``series_index``.
+    ``series_index``. Links matched less surely than *trust_floor* produce
+    changes marked untrusted, exactly as the sync pre-unticks them.
     """
     changes = []
     for link in links:
@@ -98,13 +112,25 @@ def build_metadata_changes(links, device_rows, calibre_metadata, caps,
             if sort and (row.firstauthor or '') != sort:
                 columns['firstauthor'] = sort
                 old['firstauthor'] = row.firstauthor
-                if 'first_author_letter' in caps.cols.get('books_impl', ()):
-                    columns['first_author_letter'] = first_letter(sort)
-                    old['first_author_letter'] = row.first_author_letter
+            # The index letter follows the author sort, whether or not the
+            # sort itself is moving: a book can hold the right name under
+            # the wrong letter, and that is the half the reader files by.
+            # Case is the firmware's business, so only a different letter
+            # counts, not a differently cased one.
+            letter = first_letter(sort)
+            if (letter and 'first_author_letter'
+                    in caps.cols.get('books_impl', ())
+                    and letter.casefold()
+                    != (row.first_author_letter or '').casefold()):
+                columns['first_author_letter'] = letter
+                old['first_author_letter'] = row.first_author_letter
 
         if push_series and caps.has_series:
             series = meta.get('series') or None
-            index = meta.get('series_index')
+            # calibre keeps a series index of 1.0 on every book, series or
+            # not. Without a series it means nothing, and pushing it would
+            # number every unseried book on the reader as "1".
+            index = meta.get('series_index') if series else None
             try:
                 index = int(index) if index is not None else None
             except (TypeError, ValueError):
@@ -129,7 +155,10 @@ def build_metadata_changes(links, device_rows, calibre_metadata, caps,
                 calibre_id=link.calibre_id,
                 display_title=link.title or meta.get('title') or '',
                 columns=columns,
-                old={k: v for k, v in old.items() if k in columns}))
+                old={k: v for k, v in old.items() if k in columns},
+                match=link.confidence.label,
+                trusted=(trust_floor is None
+                         or link.confidence >= trust_floor)))
 
     debug('metadata push: %d book(s) would change' % len(changes))
     return changes
@@ -170,6 +199,38 @@ def apply_metadata(conn, changes):
                 for c in group]
         conn.executemany(statement, rows)
         written += len(rows)
-    debug('metadata push wrote %d row(s) in %d group(s)'
-          % (written, len(groups)))
+    reindexed = _reindex_search(conn, changes)
+    debug('metadata push wrote %d row(s) in %d group(s), re-indexed %d'
+          % (written, len(groups), reindexed))
     return written
+
+
+SEARCH_COLUMNS = frozenset({'title', 'author'})
+
+REINDEX_SQL = (
+    'UPDATE search SET '
+    'title = (SELECT title FROM books_impl WHERE id = ?), '
+    'author = (SELECT author FROM books_impl WHERE id = ?) '
+    'WHERE book_id = ?')
+
+
+def _reindex_search(conn, changes):
+    """Bring the device's full-text index in line with what was written.
+
+    The firmware has a trigger for this, but it compares old and new with
+    ``!=``, which is never true against NULL. A book whose author was
+    missing -- the very case "only books with no author" exists for --
+    would keep its empty search entry and stay unfindable by the name just
+    given to it. Doing it here as well costs one statement per book and is
+    harmless where the trigger did fire.
+    """
+    ids = [c.device_book_id for c in changes
+           if SEARCH_COLUMNS & set(c.columns)]
+    if not ids:
+        return 0
+    has_search = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE name = 'search'").fetchone()
+    if has_search is None:
+        return 0
+    conn.executemany(REINDEX_SQL, [(i, i, i) for i in ids])
+    return len(ids)

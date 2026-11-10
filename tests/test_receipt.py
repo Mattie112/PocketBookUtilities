@@ -70,6 +70,25 @@ class TestBuilding(ReceiptTestCase):
         self.assertEqual(items[0]['kind'], receipt.COLLECTIONS)
         self.assertEqual(items[0]['names'], ['A', 'B'])
 
+    def test_a_position_write_is_not_asserted_on(self):
+        """We write it, but opening the book moves it straight away."""
+        plan = plan_with(ProposedChange(
+            link=link(1), field='position', direction=Side.DEVICE,
+            old=None, new='pbr:/webkit?##epubcfi(/6/2!/4)', reason='test'))
+        self.assertEqual(receipt.build(plan, 1, BY_KEY.get), [])
+
+    def test_removed_collections_are_recorded_only_when_removing(self):
+        change = ProposedChange(
+            link=link(1), field='collections', direction=Side.DEVICE,
+            old=frozenset({'Old', 'Kept'}), new=frozenset({'kept', 'New'}),
+            reason='test')
+        removing = receipt.build(plan_with(change), 1, BY_KEY.get)
+        self.assertEqual(removing[0]['removed'], ['Old'],
+                         'a name kept under another casing is not removed')
+        keeping = receipt.build(plan_with(change), 1, BY_KEY.get,
+                                remove_missing=False)
+        self.assertEqual(keeping[0]['removed'], [])
+
     def test_unselected_changes_are_not_recorded(self):
         plan = plan_with(ProposedChange(
             link=link(1), field='favourite', direction=Side.DEVICE,
@@ -146,6 +165,47 @@ class TestCollectionsVerifying(ReceiptTestCase):
         failures = receipt.verify(self.conn(), items)
         self.assertEqual(len(failures), 1)
         self.assertEqual(failures[0][1], [])
+
+    def test_other_collections_on_the_book_are_not_a_revert(self):
+        """With remove-missing off the book keeps shelves we never wrote."""
+        self.add(1, ['Already There'])
+        conn = self.conn()
+        caps = schema.introspect(conn)
+        shelves, memberships = identity.load_shelves(conn, caps)
+        with dbmod.DeviceWriteTransaction(self.db_path) as device:
+            writer = collmod.ShelfWriter(device, shelves, memberships, caps)
+            writer.set_for_book(1, ['Sci-Fi'], remove_missing=False,
+                                timestamp=200)
+        items = receipt.build(plan_with(ProposedChange(
+            link=link(1), field='collections', direction=Side.DEVICE,
+            old=frozenset({'Already There'}), new=frozenset({'Sci-Fi'}),
+            reason='test')), 1, BY_KEY.get, remove_missing=False)
+        self.assertEqual(receipt.verify(self.conn(), items), [])
+
+    def test_the_devices_own_casing_is_not_a_revert(self):
+        self.add(1, ['Sci-Fi'])
+        items = receipt.build(plan_with(ProposedChange(
+            link=link(1), field='collections', direction=Side.DEVICE,
+            old=frozenset(), new=frozenset({' sci-fi '}), reason='test')),
+            1, BY_KEY.get)
+        self.assertEqual(receipt.verify(self.conn(), items), [])
+
+    def test_a_removal_that_came_back_is_caught(self):
+        self.add(1, ['Sci-Fi', 'Old'])
+        items = receipt.build(plan_with(ProposedChange(
+            link=link(1), field='collections', direction=Side.DEVICE,
+            old=frozenset({'Sci-Fi', 'Old'}), new=frozenset({'Sci-Fi'}),
+            reason='test')), 1, BY_KEY.get)
+        # 'Old' is still live: exactly what a reverted removal looks like.
+        self.assertEqual(len(receipt.verify(self.conn(), items)), 1)
+
+    def test_what_cannot_be_checked_is_not_reported_as_surviving(self):
+        items = [{'kind': receipt.SETTING, 'bookid': 1, 'profileid': 1,
+                  'column': 'no_such_column', 'value': 1},
+                 {'kind': 'something newer', 'bookid': 1}]
+        failures, unchecked = receipt.check(self.conn(), items)
+        self.assertEqual(failures, [])
+        self.assertEqual(len(unchecked), 2)
 
     def test_reading_does_not_affect_a_collections_receipt(self):
         items = self.add(1, ['Sci-Fi'])

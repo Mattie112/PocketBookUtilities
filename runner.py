@@ -9,8 +9,9 @@ import time
 from datetime import datetime
 
 from .common.compat import PluginError, debug, now_ts
-from .config import (backup_dir, column_for_field, device_settings,
-                     library_key, mapped_fields, plugin_prefs, state_db_path)
+from .config import (backup_dir, collections_in_column, column_for_field,
+                     device_settings, library_key, mapped_fields,
+                     plugin_prefs, state_db_path)
 from .device import db as dbmod
 from .device import receipt
 from .device.detect import complete_from_db
@@ -219,6 +220,10 @@ def restore_backup(device, backup_path):
             target.close()
     finally:
         source.close()
+    # What we last wrote is gone on purpose now. Left in place, the receipt
+    # would report this restore as the reader having undone our changes.
+    with SyncStateStore(state_db_path()) as store:
+        store.clear_receipt(device.serial)
     debug('restored %s onto the device' % backup_path)
 
 
@@ -287,8 +292,17 @@ class SyncContext:
             device_only=device_only,
         )
 
+        calibre_read_only = {}
+        if not collections_in_column(self.settings):
+            calibre_read_only['collections'] = (
+                'collection names come from calibre\'s %s here, which this '
+                'plugin reads but never changes; switch the source to the '
+                'collections column to load collections from the reader'
+                % self.settings.get('collections_source'))
+
         self.plan = engine.build_plan(
             self.inputs, self.caps, enabled_fields=fields, mode=mode,
+            calibre_read_only=calibre_read_only,
             skew=int(self.settings.get('skew_seconds', 90)),
             allow_clear=bool(self.settings.get('allow_clear', False)),
             trust_floor=MatchConfidence(
@@ -341,7 +355,8 @@ class SyncContext:
         stamp = now_ts()
         with self.copy.write() as conn:
             engine.apply_to_device(conn, self.plan, self.device.profile_id,
-                                   timestamp=stamp)
+                                   timestamp=stamp,
+                                   has_profiles=self.caps.has_profiles)
             if self.caps.has_shelves:
                 collmod.apply_collections_to_device(
                     conn, self.plan, self.shelves, self.memberships,
@@ -353,8 +368,10 @@ class SyncContext:
         return len({c.link.device_book_id for c in changes})
 
     def _write_receipt(self):
-        expectations = receipt.build(self.plan, self.device.profile_id,
-                                     BY_KEY.get)
+        expectations = receipt.build(
+            self.plan, self.device.profile_id, BY_KEY.get,
+            remove_missing=bool(self.settings.get(
+                'collections_remove_missing', True)))
         if not expectations:
             return
         with SyncStateStore(state_db_path()) as store:
@@ -421,16 +438,28 @@ def completion_message(calibre_written, device_written, ejected=False):
     return '\n'.join(lines)
 
 
-def verify_last_write(device):
+def acknowledge_receipt(device):
+    """Note that a failed receipt has been shown to the user."""
+    with SyncStateStore(state_db_path()) as store:
+        stored = store.get_receipt(device.serial)
+        if stored:
+            stored['reported'] = True
+            store.set_receipt(device.serial, stored)
+
+
+def verify_last_write(device, unattended=False):
     """Did the reader keep the changes we made last time?
 
     PocketBook can rewrite its database from memory when the USB connection
     drops, silently undoing anything written. Returns ``(ok, message)`` or
-    ``None`` when there is nothing to check.
+    ``None`` when there is nothing to check. *unattended* is the check made
+    on connecting, which stays quiet about a failure already reported.
     """
     with SyncStateStore(state_db_path()) as store:
         stored = store.get_receipt(device.serial)
     if not stored:
+        return None
+    if unattended and stored.get('reported'):
         return None
 
     expectations = stored.get('expectations')
@@ -442,13 +471,20 @@ def verify_last_write(device):
 
     copy = dbmod.WorkingCopy(device.db_path)
     try:
-        failures = receipt.verify(copy.open(), expectations)
+        failures, unchecked = receipt.check(copy.open(), expectations)
     finally:
         copy.close()
 
     when = time.strftime('%Y-%m-%d %H:%M',
                          time.localtime(stored.get('when', 0)))
-    if not failures:
-        return True, ('All %d change(s) written on %s are still on the '
-                      'device.' % (len(expectations), when))
-    return False, receipt.describe(failures, when)
+    if failures:
+        return False, receipt.describe(failures, when)
+    if unchecked:
+        # Not a revert, but not a clean bill of health either.
+        return True, ('%d of the %d change(s) written on %s are still on '
+                      'the device. The other %d could not be checked on '
+                      'this device.'
+                      % (len(expectations) - len(unchecked),
+                         len(expectations), when, len(unchecked)))
+    return True, ('All %d change(s) written on %s are still on the '
+                  'device.' % (len(expectations), when))

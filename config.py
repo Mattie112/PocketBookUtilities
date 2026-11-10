@@ -157,10 +157,26 @@ def column_for_field(settings, field):
 
 
 def mapped_fields(settings):
-    """Fields that are both enabled and actually mapped to a column."""
+    """Fields that are both enabled and have somewhere to come from.
+
+    For every field that is a column, except collections when the names are
+    taken from tags, the series or a template: those need no column at all.
+    """
     columns = settings.get('columns', {})
     enabled = set(settings.get('enabled_fields', ()))
-    return {key for key in enabled if columns.get(key)}
+    return {key for key in enabled
+            if columns.get(key)
+            or (key == 'collections' and not collections_in_column(settings))}
+
+
+def collections_in_column(settings):
+    """Are collection names kept in the mapped column (the default)?
+
+    Only then can a change made on the reader be written back to calibre.
+    Tags, the series and a template are read, never written: the plugin
+    will not edit a book's tags to mirror a shelf.
+    """
+    return settings.get('collections_source', 'column') == 'column'
 
 
 def missing_columns(settings, caps):

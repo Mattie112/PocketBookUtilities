@@ -26,6 +26,12 @@ UNDELETE_SHELF = (
 ADD_MEMBERSHIP = (
     'INSERT INTO bookshelfs_books (bookshelfid, bookid, ts, is_deleted) '
     'VALUES (?, ?, ?, 0)')
+#: The same inserts for a firmware with no ``is_deleted`` column to fill.
+CREATE_SHELF_WITH_UUID_PLAIN = (
+    'INSERT INTO bookshelfs (name, ts, uuid) VALUES (?, ?, ?)')
+CREATE_SHELF_PLAIN = 'INSERT INTO bookshelfs (name, ts) VALUES (?, ?)'
+ADD_MEMBERSHIP_PLAIN = (
+    'INSERT INTO bookshelfs_books (bookshelfid, bookid, ts) VALUES (?, ?, ?)')
 UNDELETE_MEMBERSHIP = (
     'UPDATE bookshelfs_books SET is_deleted = 0, ts = ? '
     'WHERE bookshelfid = ? AND bookid = ?')
@@ -86,7 +92,8 @@ class ShelfWriter:
             self.by_name.setdefault(shelf['name'].casefold(), shelf)
         self.memberships = {k: dict(v) for k, v in memberships.items()}
         self.counts = {'shelves_created': 0, 'shelves_undeleted': 0,
-                       'added': 0, 'readded': 0, 'removed': 0}
+                       'added': 0, 'readded': 0, 'removed': 0,
+                       'not_removable': 0}
 
     def shelf_id_for(self, name, timestamp):
         """Resolve a collection name to an id, creating or undeleting it."""
@@ -98,12 +105,16 @@ class ShelfWriter:
                 self.counts['shelves_undeleted'] += 1
             return existing['id']
 
+        flagged = self.caps.has_shelf_soft_delete
         if self.uuid_style:
             cursor = self.conn.execute(
-                CREATE_SHELF_WITH_UUID,
+                CREATE_SHELF_WITH_UUID if flagged
+                else CREATE_SHELF_WITH_UUID_PLAIN,
                 (name, timestamp, make_uuid(self.uuid_style)))
         else:
-            cursor = self.conn.execute(CREATE_SHELF, (name, timestamp))
+            cursor = self.conn.execute(
+                CREATE_SHELF if flagged else CREATE_SHELF_PLAIN,
+                (name, timestamp))
         shelf_id = cursor.lastrowid
         record = {'id': shelf_id, 'name': name, 'is_deleted': 0}
         self.shelves[shelf_id] = record
@@ -125,8 +136,10 @@ class ShelfWriter:
         for shelf_id in wanted_ids:
             state = current.get(shelf_id)
             if state is None:
-                self.conn.execute(ADD_MEMBERSHIP,
-                                  (shelf_id, device_book_id, timestamp))
+                self.conn.execute(
+                    ADD_MEMBERSHIP if self.caps.has_shelf_is_deleted
+                    else ADD_MEMBERSHIP_PLAIN,
+                    (shelf_id, device_book_id, timestamp))
                 self.counts['added'] += 1
             elif state:
                 self.conn.execute(UNDELETE_MEMBERSHIP,
@@ -137,6 +150,12 @@ class ShelfWriter:
         if remove_missing:
             for shelf_id, state in list(current.items()):
                 if shelf_id in wanted_ids or state:
+                    continue
+                if not self.caps.has_shelf_is_deleted:
+                    # Taking a book off a shelf means flagging the row, and
+                    # this firmware has no flag. Erasing the row instead is
+                    # the one thing this plugin never does.
+                    self.counts['not_removable'] += 1
                     continue
                 self.conn.execute(REMOVE_MEMBERSHIP,
                                   (timestamp, shelf_id, device_book_id))
