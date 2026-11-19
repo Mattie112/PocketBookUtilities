@@ -26,7 +26,12 @@ jobs:
     name: Build and attach the plugin zip
     runs-on: ubuntu-latest
     steps:
+      # Build the tagged commit, not whatever the default branch holds by
+      # now: a manual run for an older tag would otherwise attach newer,
+      # unreleased code to that release under the old version number.
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.event.release.tag_name }}
 
       - uses: actions/setup-python@v7
         with:
@@ -34,11 +39,16 @@ jobs:
 
       - name: Stamp the version from the tag
         id: version
+        # The tag reaches the script through the environment, never pasted
+        # into it, so nothing in a tag name can run as shell.
+        env:
+          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
         run: |
-          TAG="${{ github.event.inputs.tag || github.event.release.tag_name }}"
+          # Fails here on anything that is not vX.Y.Z[-suffix], before the
+          # value is written anywhere.
+          PRERELEASE="$(python build.py --is-prerelease "$TAG")"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$(python build.py --is-prerelease "$TAG")" \
-            >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
           python build.py --set-version "$TAG"
           python build.py --version
 

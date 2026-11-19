@@ -14,6 +14,7 @@ from qt.core import (
     QTableWidgetItem,
     QTextBrowser, QVBoxLayout, QWidget)
 
+from ..sync.metadata_push import DERIVED_FROM
 from ..sync.model import Side
 
 MAX_VALUE_CHARS = 60
@@ -115,11 +116,87 @@ class TextReportDialog(QDialog):
         self.resize(QSize(820, 560))
 
 
+class CheckTableDialog(QDialog):
+    """A sortable table with a tick box in the first column of every row.
+
+    Both review dialogs are this: rows the user can re-sort, each mapped
+    back to the thing it stands for however the table is ordered.
+    """
+
+    CHECK_COLUMN = 0
+
+    def _make_table(self, row_count, headers):
+        table = QTableWidget(row_count, len(headers), self)
+        table.setHorizontalHeaderLabels(headers)
+        table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.verticalHeader().setVisible(False)
+        return table
+
+    def _finish_table(self, table, stretch):
+        """Call once the rows are in: sorting while filling moves them."""
+        header = table.horizontalHeader()
+        for column in stretch:
+            header.setSectionResizeMode(column,
+                                        QHeaderView.ResizeMode.Stretch)
+        table.resizeColumnToContents(self.CHECK_COLUMN)
+        table.setSortingEnabled(True)
+
+    def _check_item(self, index, checked=True, checkable=True):
+        """The tick box for the row that stands for entry *index*."""
+        item = QTableWidgetItem()
+        # Remember which entry this row is, so the tick boxes still map
+        # correctly after the user re-sorts the table.
+        item.setData(Qt.ItemDataRole.UserRole, index)
+        if checkable:
+            item.setFlags(Qt.ItemFlag.ItemIsUserCheckable
+                          | Qt.ItemFlag.ItemIsEnabled)
+            item.setCheckState(Qt.CheckState.Checked if checked
+                               else Qt.CheckState.Unchecked)
+        else:
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        return item
+
+    def _check_items(self, entries):
+        """``(check_item, entry)`` pairs, correct whatever the sort order."""
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, self.CHECK_COLUMN)
+            if item is None:
+                continue
+            index = item.data(Qt.ItemDataRole.UserRole)
+            if index is None or not 0 <= int(index) < len(entries):
+                continue
+            yield item, entries[int(index)]
+
+    def _tick(self, entries, predicate):
+        for item, entry in self._check_items(entries):
+            item.setCheckState(Qt.CheckState.Checked if predicate(entry)
+                               else Qt.CheckState.Unchecked)
+
+    def _selection_buttons(self, pairs):
+        row = QHBoxLayout()
+        for label, slot in pairs:
+            button = QPushButton(label)
+            button.clicked.connect(slot)
+            row.addWidget(button)
+        row.addStretch(1)
+        return row
+
+    def _ok_cancel(self, ok_text):
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                                   | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(ok_text)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        return buttons
+
+
 COLUMNS = ('', 'Book', 'What', 'Direction', 'From', 'To', 'Why')
 CHECK_COL, TITLE_COL, FIELD_COL, DIR_COL, OLD_COL, NEW_COL, WHY_COL = range(7)
 
 
-class ChangeReviewDialog(QDialog):
+class ChangeReviewDialog(CheckTableDialog):
     """Lists every proposed change and lets the user veto any of them."""
 
     def __init__(self, parent, plan, field_labels, read_only=False,
@@ -162,63 +239,31 @@ class ChangeReviewDialog(QDialog):
             note.setStyleSheet('color: palette(mid);')
             layout.addWidget(note)
 
-        self.table = QTableWidget(len(self.changes), len(COLUMNS), self)
-        self.table.setHorizontalHeaderLabels(COLUMNS)
-        self.table.setSelectionBehavior(
-            QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(
-            QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
+        self.table = self._make_table(len(self.changes), COLUMNS)
         self._fill()
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(TITLE_COL,
-                                    QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(WHY_COL, QHeaderView.ResizeMode.Stretch)
-        self.table.resizeColumnToContents(CHECK_COL)
-        self.table.setSortingEnabled(True)
+        self._finish_table(self.table, (TITLE_COL, WHY_COL))
         layout.addWidget(self.table)
 
         if not read_only:
-            buttons_row = QHBoxLayout()
-            for label, slot in (('Select &all', self.select_all),
-                                ('Select &none', self.select_none),
-                                ('Only &confident matches',
-                                 self.select_trusted)):
-                button = QPushButton(label)
-                button.clicked.connect(slot)
-                buttons_row.addWidget(button)
-            buttons_row.addStretch(1)
-            layout.addLayout(buttons_row)
+            layout.addLayout(self._selection_buttons((
+                ('Select &all', self.select_all),
+                ('Select &none', self.select_none),
+                ('Only &confident matches', self.select_trusted))))
 
         if read_only:
             buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
             buttons.rejected.connect(self.reject)
             buttons.accepted.connect(self.accept)
         else:
-            buttons = QDialogButtonBox(
-                QDialogButtonBox.StandardButton.Ok
-                | QDialogButtonBox.StandardButton.Cancel)
-            buttons.button(QDialogButtonBox.StandardButton.Ok).setText(
-                '&Apply selected')
-            buttons.accepted.connect(self.accept)
-            buttons.rejected.connect(self.reject)
+            buttons = self._ok_cancel('&Apply selected')
         layout.addWidget(buttons)
         self.resize(QSize(1000, 600))
 
     def _fill(self):
         for row, change in enumerate(self.changes):
-            check = QTableWidgetItem()
-            # Remember which change this row is, so the tick boxes still map
-            # correctly after the user re-sorts the table.
-            check.setData(Qt.ItemDataRole.UserRole, row)
-            if self.read_only:
-                check.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            else:
-                check.setFlags(Qt.ItemFlag.ItemIsUserCheckable
-                               | Qt.ItemFlag.ItemIsEnabled)
-                check.setCheckState(Qt.CheckState.Checked if change.selected
-                                    else Qt.CheckState.Unchecked)
-            self.table.setItem(row, CHECK_COL, check)
+            self.table.setItem(row, CHECK_COL, self._check_item(
+                row, checked=change.selected,
+                checkable=not self.read_only))
 
             title = QTableWidgetItem(change.link.title or
                                      str(change.link.calibre_id))
@@ -247,36 +292,20 @@ class ChangeReviewDialog(QDialog):
             self.table.setItem(row, WHY_COL, why)
 
     # -- selection helpers ---------------------------------------------
-    def _rows(self):
-        """``(check_item, change)`` pairs, correct whatever the sort order."""
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, CHECK_COL)
-            if item is None:
-                continue
-            index = item.data(Qt.ItemDataRole.UserRole)
-            if index is None or not 0 <= int(index) < len(self.changes):
-                continue
-            yield item, self.changes[int(index)]
-
-    def _set_all(self, predicate):
-        for item, change in self._rows():
-            item.setCheckState(Qt.CheckState.Checked if predicate(change)
-                               else Qt.CheckState.Unchecked)
-
     def select_all(self):
-        self._set_all(lambda change: True)
+        self._tick(self.changes, lambda change: True)
 
     def select_none(self):
-        self._set_all(lambda change: False)
+        self._tick(self.changes, lambda change: False)
 
     def select_trusted(self):
-        self._set_all(lambda change: change.link.is_trusted)
+        self._tick(self.changes, lambda change: change.link.is_trusted)
 
     def apply_selection(self):
         """Copy the tick boxes back onto the plan."""
         if self.read_only:
             return self.plan
-        for item, change in self._rows():
+        for item, change in self._check_items(self.changes):
             change.selected = item.checkState() == Qt.CheckState.Checked
         return self.plan
 
@@ -300,12 +329,17 @@ FIELD_LABELS_DEVICE = {
 }
 
 
-class MetadataReviewDialog(QDialog):
+class MetadataReviewDialog(CheckTableDialog):
     """Review the metadata push in a table you can read and resize.
 
     This used to be calibre's question dialog with the whole preview
     crammed into its details box: fixed size, no wrapping, and all or
     nothing. Same shape as the sync review now, including per-row choice.
+
+    A value computed from another one (the author index letter, the title
+    sort) has no row of its own when its source is changing too: it goes
+    wherever the source's row goes. Ticking one half of such a pair would
+    leave the device row contradicting itself.
     """
 
     def __init__(self, parent, changes, title='Update device metadata'):
@@ -315,6 +349,8 @@ class MetadataReviewDialog(QDialog):
         self.rows = []
         for change in self.changes:
             for column in sorted(change.columns):
+                if DERIVED_FROM.get(column) in change.columns:
+                    continue
                 self.rows.append((change, column))
 
         self.setWindowTitle(title)
@@ -331,50 +367,27 @@ class MetadataReviewDialog(QDialog):
         note.setWordWrap(True)
         layout.addWidget(note)
 
-        self.table = QTableWidget(len(self.rows), len(META_COLUMNS), self)
-        self.table.setHorizontalHeaderLabels(META_COLUMNS)
-        self.table.setSelectionBehavior(
-            QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(
-            QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
+        self.table = self._make_table(len(self.rows), META_COLUMNS)
         self._fill()
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(M_TITLE, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(M_OLD, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(M_NEW, QHeaderView.ResizeMode.Stretch)
-        self.table.resizeColumnToContents(M_CHECK)
-        self.table.setSortingEnabled(True)
+        self._finish_table(self.table, (M_TITLE, M_OLD, M_NEW))
         layout.addWidget(self.table)
 
-        buttons_row = QHBoxLayout()
-        for label, slot in (('Select &all', self.select_all),
-                            ('Select &none', self.select_none)):
-            button = QPushButton(label)
-            button.clicked.connect(slot)
-            buttons_row.addWidget(button)
-        buttons_row.addStretch(1)
-        layout.addLayout(buttons_row)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
-                                   | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(
-            '&Write to device')
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        layout.addLayout(self._selection_buttons((
+            ('Select &all', self.select_all),
+            ('Select &none', self.select_none))))
+        layout.addWidget(self._ok_cancel('&Write to device'))
         self.resize(QSize(1000, 600))
 
     def _fill(self):
         for row, (change, column) in enumerate(self.rows):
-            check = QTableWidgetItem()
-            check.setData(Qt.ItemDataRole.UserRole, row)
-            check.setFlags(Qt.ItemFlag.ItemIsUserCheckable
-                           | Qt.ItemFlag.ItemIsEnabled)
-            check.setCheckState(Qt.CheckState.Checked)
-            self.table.setItem(row, M_CHECK, check)
-            self.table.setItem(row, M_TITLE,
-                               QTableWidgetItem(change.display_title))
+            self.table.setItem(row, M_CHECK, self._check_item(
+                row, checked=change.trusted))
+            title = QTableWidgetItem(change.display_title)
+            if not change.trusted:
+                title.setToolTip(
+                    'Matched to the device only by %s, so this is unticked '
+                    'by default.' % change.match)
+            self.table.setItem(row, M_TITLE, title)
             self.table.setItem(row, M_FIELD, QTableWidgetItem(
                 FIELD_LABELS_DEVICE.get(column, column)))
             self.table.setItem(row, M_OLD, QTableWidgetItem(
@@ -382,33 +395,29 @@ class MetadataReviewDialog(QDialog):
             self.table.setItem(row, M_NEW, QTableWidgetItem(
                 format_value(change.columns.get(column))))
 
-    def _items(self):
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, M_CHECK)
-            if item is None:
-                continue
-            index = item.data(Qt.ItemDataRole.UserRole)
-            if index is None or not 0 <= int(index) < len(self.rows):
-                continue
-            yield item, self.rows[int(index)]
+    @staticmethod
+    def _followers(change, column):
+        """Derived columns that travel with *column* in this change."""
+        return sorted(name for name, source in DERIVED_FROM.items()
+                      if source == column and name in change.columns)
 
     def select_all(self):
-        for item, _row in self._items():
-            item.setCheckState(Qt.CheckState.Checked)
+        self._tick(self.rows, lambda row: True)
 
     def select_none(self):
-        for item, _row in self._items():
-            item.setCheckState(Qt.CheckState.Unchecked)
+        self._tick(self.rows, lambda row: False)
 
     def selected_changes(self):
         """The changes, rebuilt from only the ticked rows."""
         from dataclasses import replace
 
         keep = {}
-        for item, (change, column) in self._items():
+        for item, (change, column) in self._check_items(self.rows):
             if item.checkState() != Qt.CheckState.Checked:
                 continue
-            keep.setdefault(id(change), (change, []))[1].append(column)
+            columns = keep.setdefault(id(change), (change, []))[1]
+            columns.append(column)
+            columns.extend(self._followers(change, column))
 
         out = []
         for change, columns in keep.values():

@@ -166,6 +166,24 @@ class TestThePreviewTellsTheTruth(MetadataTestCase):
         self.assertEqual(change.old['first_author_letter'], '0')
         self.assertEqual(change.columns['first_author_letter'], 'C')
 
+    def test_a_wrong_letter_beside_the_right_name_is_corrected(self):
+        """The letter is what the reader files by, so it is checked even
+        when the author sort itself needs no change."""
+        with dbmod.DeviceWriteTransaction(self.db_path) as conn:
+            conn.execute("UPDATE books_impl SET first_author_letter = '0' "
+                         'WHERE id = 1')
+        caps, index = self.load()
+        row = index.by_book_id[1]
+        changes = metadata_push.build_metadata_changes(
+            [self.link(100, 1)], index.by_book_id,
+            {100: {'authors': row.author, 'author_sort': row.firstauthor}},
+            caps, push_author=True, push_series=False)
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0].columns,
+                         {'first_author_letter':
+                          row.firstauthor.strip()[0].upper()})
+        self.assertEqual(changes[0].old, {'first_author_letter': '0'})
+
     def test_a_misfiled_book_is_detectable_from_the_change(self):
         """What a caller needs to answer "which books does this rescue?"."""
         caps, index = self.load()
@@ -176,3 +194,115 @@ class TestThePreviewTellsTheTruth(MetadataTestCase):
         misfiled = [c for c in changes
                     if str(c.old.get('first_author_letter') or '').isdigit()]
         self.assertEqual(len(misfiled), 1)
+
+
+class TestSeriesNumber(MetadataTestCase):
+
+    def test_a_book_without_a_series_gets_no_number(self):
+        """calibre keeps series_index 1.0 on every book, series or not."""
+        caps, index = self.load()
+        row = next(r for r in index.rows
+                   if not r.series and not r.numinseries)
+        changes = metadata_push.build_metadata_changes(
+            [self.link(100, row.book_id)], index.by_book_id,
+            {100: {'series': None, 'series_index': 1.0}},
+            caps, push_author=False, push_series=True)
+        self.assertEqual(changes, [])
+
+
+class TestSearchIndex(MetadataTestCase):
+
+    def test_a_missing_author_is_indexed_once_filled_in(self):
+        """The firmware trigger compares with !=, which NULL never passes."""
+        with dbmod.DeviceWriteTransaction(self.db_path) as conn:
+            conn.execute('UPDATE books_impl SET author = NULL WHERE id = 1')
+            conn.execute('UPDATE search SET author = NULL WHERE book_id = 1')
+        caps, index = self.load()
+        self.assertIsNone(index.by_book_id[1].author)
+
+        changes = metadata_push.build_metadata_changes(
+            [self.link(100, 1)], index.by_book_id,
+            {100: {'authors': 'Andy Weir', 'author_sort': 'Weir, Andy'}},
+            caps, push_author=True, push_series=False)
+        with dbmod.DeviceWriteTransaction(self.db_path) as conn:
+            metadata_push.apply_metadata(conn, changes)
+
+        conn = sqlite3.connect(self.db_path)
+        self.addCleanup(conn.close)
+        self.assertEqual(
+            conn.execute('SELECT author FROM search '
+                         'WHERE book_id = 1').fetchone()[0], 'Andy Weir')
+
+
+class TestMatchConfidence(MetadataTestCase):
+
+    def test_a_weak_match_is_marked_untrusted(self):
+        caps, index = self.load()
+        weak = BookLink(calibre_id=100, device_book_id=1, lpath='',
+                        device_path='', confidence=MatchConfidence.METADATA)
+        sure = self.link(101, 2)
+        meta = {100: {'authors': 'Someone Else', 'author_sort': 'Else, S'},
+                101: {'authors': 'Another One', 'author_sort': 'One, A'}}
+        changes = metadata_push.build_metadata_changes(
+            [weak, sure], index.by_book_id, meta, caps,
+            push_series=False, trust_floor=MatchConfidence.BASENAME)
+        by_id = {c.calibre_id: c for c in changes}
+        self.assertFalse(by_id[100].trusted)
+        self.assertEqual(by_id[100].match, 'title + author')
+        self.assertTrue(by_id[101].trusted)
+
+
+class TestClearingIsGuarded(MetadataTestCase):
+    """A value the device has and calibre lacks must not be blanked.
+
+    Found on a real library: the reader knew 'De Hades factor' was book 1
+    of Covert-One, calibre did not, and a series push would have erased it
+    silently among four legitimate fills.
+    """
+
+    def meta(self, **kw):
+        base = {'authors': 'A Writer', 'author_sort': 'Writer, A',
+                'series': None, 'series_index': None}
+        base.update(kw)
+        return {100: base}
+
+    def test_a_series_the_device_has_is_not_erased(self):
+        caps, index = self.load()
+        row = index.by_book_id[6]
+        self.assertEqual(row.series, 'Net Force Explorers ENG')
+
+        changes = metadata_push.build_metadata_changes(
+            [self.link(100, 6)], index.by_book_id, self.meta(),
+            caps, push_author=False, push_series=True)
+        for change in changes:
+            self.assertNotIn('series', change.columns)
+            self.assertNotIn('numinseries', change.columns)
+
+    def test_it_is_erased_when_asked_for(self):
+        caps, index = self.load()
+        changes = metadata_push.build_metadata_changes(
+            [self.link(100, 6)], index.by_book_id, self.meta(),
+            caps, push_author=False, push_series=True, allow_clear=True)
+        self.assertEqual(changes[0].columns['series'], None)
+
+    def test_filling_an_empty_device_value_is_untouched(self):
+        caps, index = self.load()
+        changes = metadata_push.build_metadata_changes(
+            [self.link(100, 7)], index.by_book_id,
+            self.meta(series='A New Series', series_index=3),
+            caps, push_author=False, push_series=True)
+        self.assertEqual(changes[0].columns['series'], 'A New Series')
+
+    def test_a_real_change_still_goes_through(self):
+        caps, index = self.load()
+        changes = metadata_push.build_metadata_changes(
+            [self.link(100, 6)], index.by_book_id,
+            self.meta(series='Something Else', series_index=2),
+            caps, push_author=False, push_series=True)
+        self.assertEqual(changes[0].columns['series'], 'Something Else')
+
+    def test_blank_text_counts_as_empty(self):
+        self.assertTrue(metadata_push._is_empty(None))
+        self.assertTrue(metadata_push._is_empty('   '))
+        self.assertFalse(metadata_push._is_empty('x'))
+        self.assertFalse(metadata_push._is_empty(0))

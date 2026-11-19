@@ -496,3 +496,124 @@ class TestDisplayValues(EngineTestCase):
                                 reason='test')
         self.assertEqual(change.display_old, 0)
         self.assertEqual(change.display_new, 1)
+
+
+class TestLeftDisagreements(unittest.TestCase):
+    """A difference the last sync left on purpose is not raised again."""
+
+    spec = fields.BY_KEY['collections']
+
+    def test_a_difference_neither_side_moved_from_is_left_alone(self):
+        device = frozenset({'A', 'B'})
+        calibre = frozenset({'A'})
+        outcome = engine.decide(self.spec, device, calibre,
+                                sorted(device), sorted(calibre),
+                                None, 1790000000)
+        self.assertIsNone(outcome)
+
+    def test_it_is_raised_again_once_a_side_moves(self):
+        outcome = engine.decide(self.spec, frozenset({'A', 'B', 'C'}),
+                                frozenset({'A'}), ['A', 'B'], ['A'],
+                                None, 1790000000)
+        self.assertIs(outcome[0], Side.CALIBRE)
+
+
+class TestCollectionsFromAReadOnlySource(EngineTestCase):
+    """Tags, a series or a template cannot take a change from the reader."""
+
+    def test_a_device_change_is_skipped_with_the_reason(self):
+        conn, caps, inputs = self.inputs()
+        link = inputs.links[0]
+        inputs.device_collections = {
+            link.device_book_id: frozenset({'Made On The Reader'})}
+        plan = engine.build_plan(
+            inputs, caps, enabled_fields={'collections'},
+            calibre_read_only={'collections': 'names come from tags'})
+        self.assertEqual(plan.calibre_changes, [],
+                         'nothing may be written where the source is not')
+        self.assertIn('names come from tags',
+                      [reason for _label, reason in plan.skipped])
+
+    def test_sending_to_the_device_still_works(self):
+        conn, caps, inputs = self.inputs()
+        link = inputs.links[0]
+        inputs.calibre_collections = {link.calibre_id: frozenset({'Tag'})}
+        plan = engine.build_plan(
+            inputs, caps, enabled_fields={'collections'},
+            calibre_read_only={'collections': 'names come from tags'})
+        self.assertEqual([c.new for c in plan.device_changes],
+                         [frozenset({'Tag'})])
+
+    def test_such_collections_need_no_column(self):
+        from calibre_plugins.pocketbook_utilities import config
+        settings = {'enabled_fields': ['read', 'collections'],
+                    'columns': {'read': '#pb_read'},
+                    'collections_source': 'tags'}
+        self.assertEqual(config.mapped_fields(settings),
+                         {'read', 'collections'})
+        settings['collections_source'] = 'column'
+        self.assertEqual(config.mapped_fields(settings), {'read'})
+
+
+class TestRecordingWhatTheDeviceHolds(EngineTestCase):
+    """With removal off the device keeps more than calibre lists.
+
+    Remembering calibre's set for both sides made the extra names look like
+    a fresh change on the reader, and the next sync put a collection the
+    user had just removed in calibre straight back.
+    """
+
+    def test_a_kept_collection_does_not_bounce_back(self):
+        conn, caps, inputs = self.inputs()
+        link = inputs.links[0]
+        key = (link.calibre_id, 'collections')
+        inputs.device_collections = {link.device_book_id: frozenset({'A'})}
+        inputs.calibre_collections = {link.calibre_id: frozenset({'C'})}
+        inputs.prior = {key: (['A'], ['A'])}
+
+        plan = engine.build_plan(inputs, caps, enabled_fields={'collections'})
+        self.assertEqual(len(plan.device_changes), 1)
+
+        # Written with removal off: C is added, A stays.
+        inputs.device_collections = {
+            link.device_book_id: frozenset({'A', 'C'})}
+        entries = engine.record_entries(plan, inputs, caps,
+                                        enabled_fields={'collections'})
+        recorded = {(e[0], e[1]): (e[2], e[3]) for e in entries}
+        self.assertEqual(recorded[key],
+                         (frozenset({'A', 'C'}), frozenset({'C'})))
+
+        inputs.prior = {key: (sorted(recorded[key][0]),
+                              sorted(recorded[key][1]))}
+        again = engine.build_plan(inputs, caps,
+                                  enabled_fields={'collections'})
+        self.assertTrue(again.is_empty,
+                        'the collection kept on the device came back')
+
+
+class TestWritingWithoutProfiles(unittest.TestCase):
+    """A books_settings with no profileid cannot take the usual upsert."""
+
+    def test_rows_are_updated_or_inserted_by_book(self):
+        from calibre_plugins.pocketbook_utilities.sync.model import (
+            ProposedChange, SyncPlan)
+        conn = sqlite3.connect(':memory:')
+        self.addCleanup(conn.close)
+        conn.execute('CREATE TABLE books_settings(bookid INTEGER, '
+                     'completed INTEGER, completed_ts INTEGER)')
+        conn.execute('INSERT INTO books_settings VALUES (1, 0, 5)')
+
+        plan = SyncPlan()
+        for book_id in (1, 2):
+            plan.device_changes.append(ProposedChange(
+                link=BookLink(calibre_id=book_id, device_book_id=book_id,
+                              lpath='', device_path='',
+                              confidence=MatchConfidence.EXACT_PATH),
+                field='read', direction=Side.DEVICE, old=False, new=1,
+                reason='test'))
+        engine.apply_to_device(conn, plan, 1, timestamp=99,
+                               has_profiles=False)
+        self.assertEqual(
+            conn.execute('SELECT bookid, completed, completed_ts '
+                         'FROM books_settings ORDER BY bookid').fetchall(),
+            [(1, 1, 99), (2, 1, 99)])

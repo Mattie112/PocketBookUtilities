@@ -24,22 +24,34 @@ SELECT fi.book_id   AS book_id,
        fi.storageid AS storage_id,
        fo.name      AS folder_name,
        fi.filename  AS filename,
-       fi.size      AS size,
+       {size} AS size,
        fi.ext       AS ext,
        bi.title     AS title,
        bi.author    AS author,
        bi.firstauthor AS firstauthor,
-       bi.first_author_letter AS first_author_letter,
-       bi.sort_title AS sort_title,
-       bi.series    AS series,
-       bi.numinseries AS numinseries
+       {first_author_letter} AS first_author_letter,
+       {sort_title} AS sort_title,
+       {series} AS series,
+       {numinseries} AS numinseries
 FROM files fi
 JOIN folders fo ON fo.id = fi.folder_id
 LEFT JOIN books_impl bi ON bi.id = fi.book_id
 """
 
-#: Same query for firmware whose `files` table has no `size` column.
-FILES_SQL_NO_SIZE = FILES_SQL.replace('fi.size      AS size,', 'NULL AS size,')
+#: ``books_impl`` columns that not every firmware has. Selecting one that is
+#: missing fails the whole query, and with it every sync, so each is read
+#: only when the schema has it and comes back as NULL otherwise.
+OPTIONAL_BOOK_COLUMNS = ('first_author_letter', 'sort_title', 'series',
+                         'numinseries')
+
+
+def files_sql(caps):
+    """The file query, limited to the columns this firmware has."""
+    book_columns = caps.cols.get('books_impl', ())
+    parts = {name: ('bi.%s' % name if name in book_columns else 'NULL')
+             for name in OPTIONAL_BOOK_COLUMNS}
+    parts['size'] = 'fi.size' if caps.has_file_size else 'NULL'
+    return FILES_SQL.format(**parts)
 
 SETTINGS_SQL = """
 SELECT bookid, completed, completed_ts, favorite, favorite_ts,
@@ -49,14 +61,25 @@ WHERE profileid = ?
 """
 
 SHELVES_SQL = """
-SELECT bs.id AS shelf_id, bs.name AS shelf_name, bs.is_deleted AS shelf_deleted
+SELECT bs.id AS shelf_id, bs.name AS shelf_name, {deleted} AS shelf_deleted
 FROM bookshelfs bs
 """
 
 MEMBERSHIP_SQL = """
-SELECT bookshelfid, bookid, is_deleted, ts
+SELECT bookshelfid, bookid, {deleted} AS is_deleted
 FROM bookshelfs_books
 """
+
+
+def shelves_sql(caps):
+    """The shelf query; a firmware without soft deletes has only live ones."""
+    return SHELVES_SQL.format(
+        deleted='bs.is_deleted' if caps.has_shelf_soft_delete else '0')
+
+
+def membership_sql(caps):
+    return MEMBERSHIP_SQL.format(
+        deleted='is_deleted' if caps.has_shelf_is_deleted else '0')
 
 _PUNCT = re.compile(r'[^\w\s]', re.UNICODE)
 _SPACE = re.compile(r'\s+', re.UNICODE)
@@ -95,6 +118,22 @@ def _split_root(folder_name):
             out.append(('/' + '/'.join(parts[:depth]),
                         '/'.join(parts[depth:])))
     return out
+
+
+def _better_root(root, current):
+    """Which of two equally well-supported roots to believe.
+
+    A folder that *is* the candidate root always counts as found, because
+    all it proves is that the storage itself exists. So when every book
+    sits in one folder, ``/mnt/ext1`` and ``/mnt/ext1/Books`` score the
+    same, and taking the longer one strips ``Books/`` off every path and
+    leaves nothing matching exactly. A root the firmware is known to use
+    wins a tie; failing that the shorter one, which claims less.
+    """
+    known = root in CANDIDATE_ROOTS
+    if known != (current in CANDIDATE_ROOTS):
+        return known
+    return len(root) < len(current)
 
 
 def resolve_storage_roots(conn, prefixes):
@@ -137,7 +176,8 @@ def resolve_storage_roots(conn, prefixes):
                     if os.path.isdir(target):
                         hits += 1
                 if hits and (best is None or hits > best[0]
-                             or (hits == best[0] and len(root) > len(best[1]))):
+                             or (hits == best[0]
+                                 and _better_root(root, best[1]))):
                     best = (hits, root, location, prefix)
         if best is not None:
             resolved[storage_id] = {
@@ -175,9 +215,8 @@ class DeviceIndex:
 def load_device_index(conn, caps, prefixes):
     """Read ``files``/``folders``/``books_impl`` into a :class:`DeviceIndex`."""
     roots = resolve_storage_roots(conn, prefixes)
-    sql = FILES_SQL if caps.has_file_size else FILES_SQL_NO_SIZE
     rows = []
-    for row in conn.execute(sql):
+    for row in conn.execute(files_sql(caps)):
         folder = (row['folder_name'] or '').replace('\\', '/')
         info = roots.get(row['storage_id'])
         if info is not None and folder.startswith(info['root']):
@@ -197,14 +236,10 @@ def load_device_index(conn, caps, prefixes):
             title=row['title'],
             author=row['author'],
             firstauthor=row['firstauthor'],
-            first_author_letter=(row['first_author_letter']
-                                 if 'first_author_letter' in row.keys()
-                                 else None),
-            sort_title=(row['sort_title'] if 'sort_title' in row.keys()
-                        else None),
-            series=row['series'] if 'series' in row.keys() else None,
-            numinseries=(row['numinseries'] if 'numinseries' in row.keys()
-                         else None),
+            first_author_letter=row['first_author_letter'],
+            sort_title=row['sort_title'],
+            series=row['series'],
+            numinseries=row['numinseries'],
             relpath=relpath,
             device_path=folder + '/' + (row['filename'] or ''),
         ))
@@ -247,14 +282,14 @@ def load_shelves(conn, caps):
     if not caps.has_shelves:
         return {}, {}
     shelves = {}
-    for row in conn.execute(SHELVES_SQL):
+    for row in conn.execute(shelves_sql(caps)):
         shelves[row['shelf_id']] = {
             'id': row['shelf_id'],
             'name': row['shelf_name'] or '',
             'is_deleted': row['shelf_deleted'] or 0,
         }
     memberships = {}
-    for row in conn.execute(MEMBERSHIP_SQL):
+    for row in conn.execute(membership_sql(caps)):
         memberships.setdefault(row['bookid'], {})[row['bookshelfid']] = \
             row['is_deleted'] or 0
     return shelves, memberships

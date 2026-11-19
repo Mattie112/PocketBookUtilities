@@ -258,17 +258,36 @@ class TestMetadataReviewDialog(unittest.TestCase):
         self.addCleanup(dialog.deleteLater)
         return dialog
 
-    def test_one_row_per_changed_value(self):
+    def test_one_row_per_value_the_user_can_choose(self):
+        """The index letter rides on the author sort's row, not its own."""
         dialog = self.build()
-        self.assertEqual(dialog.table.rowCount(), 4)
+        self.assertEqual(dialog.table.rowCount(), 3)
 
     def test_fields_are_named_not_shown_as_columns(self):
         dialog = self.build()
         labels = {dialog.table.item(r, 2).text()
                   for r in range(dialog.table.rowCount())}
         self.assertIn('Author sort', labels)
-        self.assertIn('Author index letter', labels)
+        self.assertNotIn('Author index letter', labels,
+                         'a derived value must not be separately tickable')
         self.assertNotIn('firstauthor', labels)
+
+    def test_a_derived_value_alone_still_gets_a_row(self):
+        """Right name, wrong letter: the letter is the whole change."""
+        from calibre_plugins.pocketbook_utilities.common.dialogs import (
+            MetadataReviewDialog)
+        from calibre_plugins.pocketbook_utilities.sync.metadata_push import (
+            MetadataChange)
+        dialog = MetadataReviewDialog(None, [MetadataChange(
+            device_book_id=3, calibre_id=13, display_title='Letter Only',
+            columns={'first_author_letter': 'C'},
+            old={'first_author_letter': '0'})])
+        self.addCleanup(dialog.deleteLater)
+        self.assertEqual(dialog.table.rowCount(), 1)
+        self.assertEqual(dialog.table.item(0, 2).text(),
+                         'Author index letter')
+        self.assertEqual(dialog.selected_changes()[0].columns,
+                         {'first_author_letter': 'C'})
 
     def test_everything_is_ticked_to_begin_with(self):
         dialog = self.build()
@@ -276,18 +295,19 @@ class TestMetadataReviewDialog(unittest.TestCase):
         self.assertEqual(len(chosen), 2)
         self.assertEqual(sum(len(c.columns) for c in chosen), 4)
 
-    def test_unticking_drops_only_that_value(self):
+    def test_unticking_drops_that_value_and_what_follows_it(self):
+        """Author sort and its index letter are written together or not at
+        all: one without the other files the book under the wrong letter."""
         from qt.core import Qt
         dialog = self.build()
         for row in range(dialog.table.rowCount()):
-            if dialog.table.item(row, 2).text() == 'Author index letter':
+            if dialog.table.item(row, 2).text() == 'Author sort':
                 dialog.table.item(row, 0).setCheckState(
                     Qt.CheckState.Unchecked)
         chosen = dialog.selected_changes()
         first = [c for c in chosen if c.device_book_id == 1][0]
-        self.assertNotIn('first_author_letter', first.columns)
-        self.assertIn('author', first.columns)
-        self.assertNotIn('first_author_letter', first.old)
+        self.assertEqual(set(first.columns), {'author'})
+        self.assertEqual(set(first.old), {'author'})
 
     def test_select_none_means_nothing_is_written(self):
         dialog = self.build()

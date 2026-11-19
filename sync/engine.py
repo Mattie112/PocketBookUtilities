@@ -106,6 +106,13 @@ def _direction(spec, dev_c, cal_c, prior_dev, prior_cal, dev_ts, cal_ts,
         return Side.CALIBRE, 'changed on the device'
     if cal_changed and not dev_changed:
         return Side.DEVICE, 'changed in calibre'
+    if not dev_changed and not cal_changed:
+        # Different, but exactly as different as when we last looked: a
+        # disagreement the last sync left on purpose (a collection kept on
+        # the device because nothing is ever removed, the device's own
+        # casing of a name). Raising it again every run would be noise, and
+        # "fixing" it would undo what the user chose.
+        return None
 
     # Either both moved, or we have never synced this field before.
     if dev_c is None:
@@ -129,8 +136,16 @@ def _direction(spec, dev_c, cal_c, prior_dev, prior_cal, dev_ts, cal_ts,
 
 
 def build_plan(inputs, caps, enabled_fields=None, mode=Mode.MERGE,
-               skew=DEFAULT_SKEW, allow_clear=False, trust_floor=None):
-    """Compare every linked book field by field."""
+               skew=DEFAULT_SKEW, allow_clear=False, trust_floor=None,
+               calibre_read_only=None):
+    """Compare every linked book field by field.
+
+    *calibre_read_only* maps a field key to why its calibre side cannot be
+    written (collections built from tags or a template have no column to
+    put a device change in). Such a change is listed as skipped, with that
+    reason, rather than written somewhere the next sync will not look.
+    """
+    calibre_read_only = calibre_read_only or {}
     plan = SyncPlan()
     plan.unmatched_calibre = list(inputs.unmatched_calibre)
     plan.device_only = list(inputs.device_only)
@@ -184,6 +199,11 @@ def build_plan(inputs, caps, enabled_fields=None, mode=Mode.MERGE,
                      'this field is only ever read from the device'))
                 continue
             if side is Side.CALIBRE and not spec.syncs_to_calibre:
+                continue
+            if side is Side.CALIBRE and spec.key in calibre_read_only:
+                plan.skipped.append(
+                    ('%s - %s' % (link.title or link.calibre_id, spec.label),
+                     calibre_read_only[spec.key]))
                 continue
 
             if 'newer' in reason or 'same time' in reason:
@@ -282,13 +302,34 @@ def upsert_statement(columns):
     )
 
 
-def apply_to_device(conn, plan, profile_id, timestamp=None):
+def _write_without_profiles(conn, columns, rows):
+    """Update-or-insert for a ``books_settings`` with no ``profileid``.
+
+    The upsert names ``(bookid, profileid)`` as its conflict target, which
+    such a table cannot have, and nothing says ``bookid`` alone is unique
+    there. So: update what is there, and insert only when nothing was.
+    """
+    assignments = ', '.join('%s = ?' % c for c in columns)
+    update = 'UPDATE books_settings SET %s WHERE bookid = ?' % assignments
+    insert = ('INSERT INTO books_settings (%s) VALUES (%s)'
+              % (', '.join(list(columns) + ['bookid']),
+                 ', '.join('?' * (len(columns) + 1))))
+    for row in rows:
+        values = row[:-1]                # drop the profile id
+        if conn.execute(update, values).rowcount == 0:
+            conn.execute(insert, values)
+
+
+def apply_to_device(conn, plan, profile_id, timestamp=None,
+                    has_profiles=True):
     """Write the selected device-bound changes. Caller owns the transaction."""
     groups = device_settings_rows(plan, profile_id, timestamp)
     written = 0
     for columns, rows in groups.items():
-        statement = upsert_statement(columns)
-        conn.executemany(statement, rows)
+        if has_profiles:
+            conn.executemany(upsert_statement(columns), rows)
+        else:
+            _write_without_profiles(conn, columns, rows)
         written += len(rows)
     debug('wrote %d books_settings row(s) in %d statement group(s)'
           % (written, len(groups)))
@@ -302,8 +343,14 @@ def touched_device_ids(plan):
 def record_entries(plan, inputs, caps, enabled_fields=None):
     """What to remember after a successful apply.
 
-    Both sides are recorded as agreeing on the value the plan settled on, so
-    the next run sees "nothing moved" and proposes nothing.
+    Each side is recorded as it stands once the plan has been applied, so
+    the next run sees "nothing moved" and proposes nothing. For a change
+    written to the device that is what the device holds now, which need not
+    be calibre's value to the letter: with removal switched off it keeps
+    collections calibre no longer lists. Recording calibre's value for both
+    would make those look like a fresh change on the device next time and
+    carry them straight back into calibre. *inputs* must therefore hold the
+    device state as re-read after the write.
     """
     specs = available_fields(caps, enabled_fields)
     applied = {}
@@ -326,13 +373,12 @@ def record_entries(plan, inputs, caps, enabled_fields=None):
             cal_c = spec.canonical(raw_calibre)
 
             change = applied.get((link.calibre_id, spec.key))
-            if change is not None:
-                agreed = dev_c if change.direction is Side.CALIBRE else cal_c
+            if change is not None and change.direction is Side.CALIBRE:
+                entries.append((link.calibre_id, spec.key, dev_c, dev_c))
+            elif change is not None:
+                entries.append((link.calibre_id, spec.key, dev_c, cal_c))
             elif dev_c == cal_c:
-                agreed = dev_c
-            else:
-                # Not applied and still different: do not claim agreement,
-                # or the next run would treat it as "nothing moved".
-                continue
-            entries.append((link.calibre_id, spec.key, agreed, agreed))
+                entries.append((link.calibre_id, spec.key, dev_c, dev_c))
+            # Otherwise: not applied and still different. Do not claim
+            # agreement, or the next run would treat it as "nothing moved".
     return entries

@@ -80,7 +80,13 @@ class Capabilities:
 
     @property
     def has_shelf_is_deleted(self):
+        """Can a book be taken off a shelf (by flagging the membership)?"""
         return 'is_deleted' in self.cols.get('bookshelfs_books', ())
+
+    @property
+    def has_shelf_soft_delete(self):
+        """Can a shelf itself be flagged as deleted?"""
+        return 'is_deleted' in self.cols.get('bookshelfs', ())
 
     @property
     def has_series(self):
