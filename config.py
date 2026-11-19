@@ -177,6 +177,9 @@ def save_device_settings(library_db, serial, values):
     settings = _raw_settings(library_db)
     current = settings['devices'].setdefault(str(serial), {})
     current.update(values)
+    # Remembered so the settings dialog shows this device's values when it
+    # is opened with no reader attached.
+    settings['last_serial'] = str(serial)
     _write(library_db, settings)
     debug('saved settings for device %s' % serial)
     return current
@@ -184,6 +187,35 @@ def save_device_settings(library_db, serial, values):
 
 def known_devices(library_db):
     return sorted(_raw_settings(library_db)['devices'])
+
+
+def resolve_serial(library_db, device=None):
+    """Whose settings to show and save, or ``None`` if there is nobody's.
+
+    Settings are per device, which is right when more than one reader is
+    used with a library. But the settings dialog opens with no reader
+    attached, and before detection finishes at startup, and falling back to
+    the defaults there made every column mapping look unset and quietly
+    dropped anything the user changed.
+    """
+    if device is not None:
+        return device.serial
+    settings = _raw_settings(library_db)
+    devices = settings.get('devices') or {}
+    last = settings.get('last_serial')
+    if last and last in devices:
+        return last
+    if len(devices) == 1:
+        return next(iter(devices))
+    return None
+
+
+def settings_for(library_db, device=None):
+    """Per-device settings with defaults filled in, device or not."""
+    serial = resolve_serial(library_db, device)
+    if serial is None:
+        return dict(DEVICE_DEFAULTS)
+    return device_settings(library_db, serial)
 
 
 def library_key(library_db):

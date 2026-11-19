@@ -453,8 +453,9 @@ class ConfigWidget(QWidget):
             set_debug)
         set_debug(self.debug_box.isChecked())
 
-        if self.device is None:
-            debug('no device connected; per-device settings not saved')
+        serial = config_mod.resolve_serial(self.gui.current_db, self.device)
+        if serial is None:
+            debug('no device known yet; per-device settings not saved')
             return
 
         values = {
@@ -480,9 +481,8 @@ class ConfigWidget(QWidget):
             values['eject_after_write'] = self.eject_after_write.isChecked()
         if values['columns']:
             values['configured'] = True
-        if self.device.caps is not None:
+        if self.device is not None and self.device.caps is not None:
             values['schema_fingerprint'] = self.device.caps.fingerprint
 
-        config_mod.save_device_settings(self.gui.current_db,
-                                        self.device.serial, values)
+        config_mod.save_device_settings(self.gui.current_db, serial, values)
         self.plugin_action.rebuild_menus()

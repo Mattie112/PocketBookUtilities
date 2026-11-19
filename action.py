@@ -162,14 +162,15 @@ class PocketBookUtilitiesAction(InterfaceAction):
                      Mode.MERGE, None, False, None, mode)
 
     def settings(self):
-        if self.device is None:
-            return dict(config_mod.DEVICE_DEFAULTS)
-        return config_mod.device_settings(self.gui.current_db,
-                                          self.device.serial)
+        return config_mod.settings_for(self.gui.current_db, self.device)
 
     def save(self, values):
-        config_mod.save_device_settings(self.gui.current_db,
-                                        self.device.serial, values)
+        serial = config_mod.resolve_serial(self.gui.current_db, self.device)
+        if serial is None:
+            debug('no device known yet; settings not saved')
+            return False
+        config_mod.save_device_settings(self.gui.current_db, serial, values)
+        return True
 
     def _check_previous_write(self):
         try:

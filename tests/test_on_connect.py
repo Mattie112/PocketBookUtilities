@@ -142,3 +142,88 @@ class TestDirectionHelper(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class FakeLibrary:
+    """Just the prefs namespace calibre's db exposes."""
+
+    def __init__(self):
+        self.store = {}
+
+    class _Prefs:
+        def __init__(self, outer):
+            self.outer = outer
+
+        def get_namespaced(self, ns, key, default=None):
+            return self.outer.store.get((ns, key), default)
+
+        def set_namespaced(self, ns, key, val):
+            self.outer.store[(ns, key)] = val
+
+    @property
+    def prefs(self):
+        return self._Prefs(self)
+
+
+class FakeDevice:
+    def __init__(self, serial):
+        self.serial = serial
+
+
+class TestSettingsSurviveNoDevice(unittest.TestCase):
+    """Settings are per device, but the dialog opens without one.
+
+    Falling back to the bare defaults made every saved value look unset:
+    the on-connect choice read back as "do not sync" after a restart, and
+    column mappings would have looked unmapped too.
+    """
+
+    def setUp(self):
+        self.db = FakeLibrary()
+        self.device = FakeDevice('serial-1')
+
+    def save(self, **values):
+        config.save_device_settings(self.db, self.device.serial, values)
+
+    def test_a_saved_choice_reads_back_without_a_device(self):
+        self.save(on_connect=config.ON_CONNECT_AUTO_LOAD)
+        settings = config.settings_for(self.db, None)
+        self.assertEqual(config.on_connect_mode(settings),
+                         config.ON_CONNECT_AUTO_LOAD)
+
+    def test_it_also_reads_back_with_the_device(self):
+        self.save(on_connect=config.ON_CONNECT_AUTO_BOTH)
+        settings = config.settings_for(self.db, self.device)
+        self.assertEqual(config.on_connect_mode(settings),
+                         config.ON_CONNECT_AUTO_BOTH)
+
+    def test_column_mappings_survive_too(self):
+        self.save(columns={'read': '#pb_read'})
+        self.assertEqual(
+            config.settings_for(self.db, None)['columns'],
+            {'read': '#pb_read'})
+
+    def test_an_empty_library_still_gives_defaults(self):
+        settings = config.settings_for(self.db, None)
+        self.assertEqual(config.on_connect_mode(settings),
+                         config.ON_CONNECT_OFF)
+        self.assertIsNone(config.resolve_serial(self.db, None))
+
+    def test_the_last_saved_device_wins_when_several_are_known(self):
+        config.save_device_settings(self.db, 'serial-1',
+                                    {'on_connect': config.ON_CONNECT_ASK})
+        config.save_device_settings(self.db, 'serial-2',
+                                    {'on_connect': config.ON_CONNECT_AUTO_BOTH})
+        self.assertEqual(config.resolve_serial(self.db, None), 'serial-2')
+        self.assertEqual(
+            config.on_connect_mode(config.settings_for(self.db, None)),
+            config.ON_CONNECT_AUTO_BOTH)
+
+    def test_a_connected_device_always_wins_over_the_remembered_one(self):
+        config.save_device_settings(self.db, 'serial-1',
+                                    {'on_connect': config.ON_CONNECT_ASK})
+        config.save_device_settings(self.db, 'serial-2',
+                                    {'on_connect': config.ON_CONNECT_AUTO_BOTH})
+        settings = config.settings_for(self.db, FakeDevice('serial-1'))
+        self.assertEqual(config.on_connect_mode(settings),
+                         config.ON_CONNECT_ASK)
