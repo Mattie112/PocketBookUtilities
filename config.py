@@ -40,6 +40,8 @@ DEVICE_DEFAULTS = {
     'skew_seconds': 90,
     'allow_clear': False,
     'always_review': True,
+    #: What happens when the reader is plugged in. See ON_CONNECT_CHOICES.
+    'on_connect': 'off',
     'trust_floor': 2,                   # MatchConfidence.BASENAME
     'eject_after_write': False,
     'configured': False,
@@ -51,6 +53,51 @@ DEVICE_DEFAULTS = {
     'push_series': True,
     'push_missing_authors_only': False,
 }
+
+
+# --------------------------------------------------------------------------
+# What to do when the reader is connected
+# --------------------------------------------------------------------------
+
+#: Off, then increasing trust. Each label says exactly what happens, because
+#: "don't show a popup" described a consequence rather than the choice: the
+#: thing wanted is not to approve the safe direction by hand every time.
+ON_CONNECT_OFF = 'off'
+ON_CONNECT_ASK = 'ask'
+ON_CONNECT_AUTO_LOAD = 'auto_load'
+ON_CONNECT_AUTO_BOTH = 'auto_both'
+
+ON_CONNECT_CHOICES = (
+    (ON_CONNECT_OFF,
+     'Do not sync automatically'),
+    (ON_CONNECT_ASK,
+     'Sync automatically, ask before applying anything'),
+    (ON_CONNECT_AUTO_LOAD,
+     'Sync automatically, apply reader → calibre without asking, '
+     'ask about the rest'),
+    (ON_CONNECT_AUTO_BOTH,
+     'Sync automatically, apply everything without asking'),
+)
+
+#: Modes that do anything at all on connect.
+ON_CONNECT_ACTIVE = frozenset({ON_CONNECT_ASK, ON_CONNECT_AUTO_LOAD,
+                               ON_CONNECT_AUTO_BOTH})
+
+
+def on_connect_mode(settings):
+    """The stored choice, falling back to off for anything unrecognised."""
+    value = settings.get('on_connect', ON_CONNECT_OFF)
+    known = {key for key, _label in ON_CONNECT_CHOICES}
+    return value if value in known else ON_CONNECT_OFF
+
+
+def applies_without_asking(mode, side_is_device):
+    """Whether *mode* writes that side without showing the review first."""
+    if mode == ON_CONNECT_AUTO_BOTH:
+        return True
+    if mode == ON_CONNECT_AUTO_LOAD:
+        return not side_is_device
+    return False
 
 
 def plugin_prefs():

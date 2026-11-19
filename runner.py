@@ -412,6 +412,43 @@ class SyncContext:
             store.set_last_sync(self.library, self.device.serial, now_ts())
 
 
+def split_for_connect(plan, mode):
+    """Split a plan into what runs silently and what must be shown.
+
+    A change is applied without being seen only when the chosen mode covers
+    its direction *and* the book was matched confidently. A book recognised
+    only by its title and author should never have a reading position
+    written to it unwatched: that is how the wrong book gets one.
+    """
+    from .config import applies_without_asking
+
+    silent, needs_review = [], []
+    for change in plan.all_changes:
+        automatic = (applies_without_asking(
+            mode, change.direction is Side.DEVICE)
+            and change.link.is_trusted)
+        (silent if automatic else needs_review).append(change)
+    debug('on connect: %d silent, %d to review'
+          % (len(silent), len(needs_review)))
+    return silent, needs_review
+
+
+def sub_plan(plan, changes):
+    """A plan holding only *changes*, for showing part of a larger one."""
+    from .sync.model import SyncPlan
+
+    wanted = {id(c) for c in changes}
+    out = SyncPlan()
+    out.calibre_changes = [c for c in plan.calibre_changes
+                           if id(c) in wanted]
+    out.device_changes = [c for c in plan.device_changes if id(c) in wanted]
+    out.skipped = list(plan.skipped)
+    out.unmatched_calibre = list(plan.unmatched_calibre)
+    out.device_only = list(plan.device_only)
+    out.stats = dict(plan.stats)
+    return out
+
+
 def completion_message(calibre_written, device_written, ejected=False):
     """What to tell the user after a sync.
 
