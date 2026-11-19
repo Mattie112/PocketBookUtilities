@@ -6,6 +6,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: read
+  packages: read
+  pull-requests: read
+
 jobs:
   core:
     # Everything under device/ and sync/ avoids calibre and Qt on purpose,
