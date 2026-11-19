@@ -433,6 +433,11 @@ def split_for_connect(plan, mode):
     return silent, needs_review
 
 
+def has_selected_changes(plan):
+    """Is there anything ticked to write, on either side?"""
+    return bool(plan.selected(Side.CALIBRE) or plan.selected(Side.DEVICE))
+
+
 def sub_plan(plan, changes):
     """A plan holding only *changes*, for showing part of a larger one."""
     from .sync.model import SyncPlan

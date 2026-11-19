@@ -483,8 +483,7 @@ class PocketBookUtilitiesAction(InterfaceAction):
                 elif id(change) not in reviewed_ids:
                     change.selected = False
 
-            if not plan.selected(Side.CALIBRE) and not plan.selected(
-                    Side.DEVICE):
+            if not runner.has_selected_changes(plan):
                 return None
 
             calibre_written, device_written = context.apply()

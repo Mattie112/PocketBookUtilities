@@ -5,6 +5,8 @@ replaces: it never deletes anything on the device, and it never swallows an
 error into a meaningless message.
 """
 
+import ast
+import builtins as _builtins
 import io
 import os
 import re
@@ -130,3 +132,58 @@ class TestHeadlessImports(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestNoUndefinedNames(unittest.TestCase):
+    """Catch names used but never bound, without running the code.
+
+    action.py called Side.CALIBRE with no import of Side. Nothing noticed,
+    because the GUI layer is not executed by the tests, and the crash only
+    appeared once a real sync had something to do. There is no linter in
+    calibre's Python, so this is a small stand-in: it only reports a name
+    that is bound nowhere the interpreter could find it.
+    """
+
+    BUILTINS = set(dir(_builtins)) | {
+        '__file__', '__name__', '__doc__', '__package__', '__builtins__',
+        'WindowsError',
+    }
+
+    def bound_names(self, node):
+        """Every name this scope binds, however it binds it."""
+        found = set()
+        for child in ast.walk(node):
+            if isinstance(child, ast.Name) and isinstance(child.ctx,
+                                                          (ast.Store,
+                                                           ast.Del)):
+                found.add(child.id)
+            elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                    ast.ClassDef)):
+                found.add(child.name)
+            elif isinstance(child, (ast.Import, ast.ImportFrom)):
+                for alias in child.names:
+                    found.add((alias.asname or alias.name).split('.')[0])
+            elif isinstance(child, ast.arg):
+                found.add(child.arg)
+            elif isinstance(child, ast.ExceptHandler) and child.name:
+                found.add(child.name)
+            elif isinstance(child, (ast.Global, ast.Nonlocal)):
+                found.update(child.names)
+        return found
+
+    def test_every_name_used_is_bound_somewhere(self):
+        offenders = []
+        for path in package_sources():
+            with open(path, encoding='utf-8') as handle:
+                tree = ast.parse(handle.read())
+            # Module scope plus everything any nested scope binds: generous
+            # on purpose, so this reports only the clear-cut cases.
+            known = self.bound_names(tree) | self.BUILTINS
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Name) and isinstance(node.ctx,
+                                                             ast.Load):
+                    if node.id not in known:
+                        offenders.append((os.path.basename(path),
+                                          node.lineno, node.id))
+        self.assertEqual(offenders, [],
+                         'names used but never bound: %r' % (offenders,))
