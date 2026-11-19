@@ -61,6 +61,15 @@ class MetadataChange:
         return not self.columns
 
 
+def _is_empty(value):
+    """Absent for this purpose: None, blank text, or a zero series number."""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    return False
+
+
 def first_letter(value):
     text = (value or '').strip()
     if not text:
@@ -71,13 +80,16 @@ def first_letter(value):
 def build_metadata_changes(links, device_rows, calibre_metadata, caps,
                            push_title=False, push_author=True,
                            push_series=True, missing_authors_only=False,
-                           trust_floor=None):
+                           trust_floor=None, allow_clear=False):
     """Work out what would change in ``books_impl``.
 
     *calibre_metadata* maps a calibre id to a dict with ``title``,
     ``authors`` (display form), ``author_sort``, ``series`` and
     ``series_index``. Links matched less surely than *trust_floor* produce
     changes marked untrusted, exactly as the sync pre-unticks them.
+
+    With *allow_clear* off, a column the device has filled and calibre has
+    not is left alone rather than blanked.
     """
     changes = []
     for link in links:
@@ -148,6 +160,17 @@ def build_metadata_changes(links, device_rows, calibre_metadata, caps,
         # and listing 'M' -> 'M' in the preview is pure noise.
         columns = {name: value for name, value in columns.items()
                    if value != old.get(name)}
+
+        # Never blank something the device has and calibre does not, unless
+        # asked to. A book the reader knows is part of a series, where
+        # calibre was never told, would otherwise have that quietly erased
+        # among a list of legitimate fills. Same rule the sync follows.
+        if not allow_clear:
+            cleared = [name for name, value in columns.items()
+                       if _is_empty(value) and not _is_empty(old.get(name))]
+            for name in cleared:
+                del columns[name]
+                old.pop(name, None)
 
         if columns:
             changes.append(MetadataChange(

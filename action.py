@@ -483,7 +483,8 @@ class PocketBookUtilitiesAction(InterfaceAction):
                 missing_authors_only=bool(
                     settings.get('push_missing_authors_only')),
                 trust_floor=MatchConfidence(
-                    int(settings.get('trust_floor', 2))))
+                    int(settings.get('trust_floor', 2))),
+                allow_clear=bool(settings.get('allow_clear')))
 
             if not changes:
                 return info_dialog(

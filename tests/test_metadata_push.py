@@ -250,3 +250,59 @@ class TestMatchConfidence(MetadataTestCase):
         self.assertFalse(by_id[100].trusted)
         self.assertEqual(by_id[100].match, 'title + author')
         self.assertTrue(by_id[101].trusted)
+
+
+class TestClearingIsGuarded(MetadataTestCase):
+    """A value the device has and calibre lacks must not be blanked.
+
+    Found on a real library: the reader knew 'De Hades factor' was book 1
+    of Covert-One, calibre did not, and a series push would have erased it
+    silently among four legitimate fills.
+    """
+
+    def meta(self, **kw):
+        base = {'authors': 'A Writer', 'author_sort': 'Writer, A',
+                'series': None, 'series_index': None}
+        base.update(kw)
+        return {100: base}
+
+    def test_a_series_the_device_has_is_not_erased(self):
+        caps, index = self.load()
+        row = index.by_book_id[6]
+        self.assertEqual(row.series, 'Net Force Explorers ENG')
+
+        changes = metadata_push.build_metadata_changes(
+            [self.link(100, 6)], index.by_book_id, self.meta(),
+            caps, push_author=False, push_series=True)
+        for change in changes:
+            self.assertNotIn('series', change.columns)
+            self.assertNotIn('numinseries', change.columns)
+
+    def test_it_is_erased_when_asked_for(self):
+        caps, index = self.load()
+        changes = metadata_push.build_metadata_changes(
+            [self.link(100, 6)], index.by_book_id, self.meta(),
+            caps, push_author=False, push_series=True, allow_clear=True)
+        self.assertEqual(changes[0].columns['series'], None)
+
+    def test_filling_an_empty_device_value_is_untouched(self):
+        caps, index = self.load()
+        changes = metadata_push.build_metadata_changes(
+            [self.link(100, 7)], index.by_book_id,
+            self.meta(series='A New Series', series_index=3),
+            caps, push_author=False, push_series=True)
+        self.assertEqual(changes[0].columns['series'], 'A New Series')
+
+    def test_a_real_change_still_goes_through(self):
+        caps, index = self.load()
+        changes = metadata_push.build_metadata_changes(
+            [self.link(100, 6)], index.by_book_id,
+            self.meta(series='Something Else', series_index=2),
+            caps, push_author=False, push_series=True)
+        self.assertEqual(changes[0].columns['series'], 'Something Else')
+
+    def test_blank_text_counts_as_empty(self):
+        self.assertTrue(metadata_push._is_empty(None))
+        self.assertTrue(metadata_push._is_empty('   '))
+        self.assertFalse(metadata_push._is_empty('x'))
+        self.assertFalse(metadata_push._is_empty(0))
