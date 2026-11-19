@@ -243,12 +243,7 @@ class ChangeReviewDialog(CheckTableDialog):
         self.setWindowTitle(title)
         layout = QVBoxLayout(self)
 
-        summary = plan.summary()
-        if self.applied:
-            summary = ('%d change(s) will be applied automatically, '
-                       'whether or not you approve the rest. %s'
-                       % (len(self.applied), summary))
-        heading = QLabel(summary)
+        heading = QLabel(self._summary())
         heading.setWordWrap(True)
         layout.addWidget(heading)
 
@@ -281,6 +276,33 @@ class ChangeReviewDialog(CheckTableDialog):
             buttons = self._ok_cancel('&Apply selected')
         layout.addWidget(buttons)
         self.resize(QSize(1000, 600))
+
+    def _summary(self):
+        """One account of the sync, not one per slice.
+
+        Counting only the rows awaiting approval put "3 will be applied
+        automatically" next to "0 change(s) for calibre", when all three
+        of them were for calibre.
+        """
+        plan = self.plan
+        if not self.applied:
+            return plan.summary()
+
+        to_calibre = sum(1 for c in self.applied
+                         if c.direction is Side.CALIBRE)
+        to_device = len(self.applied) - to_calibre
+        parts = []
+        if to_calibre:
+            parts.append('%d for calibre' % to_calibre)
+        if to_device:
+            parts.append('%d for the device' % to_device)
+        return ('%s will be applied automatically, whether or not you '
+                'approve the rest. Awaiting your approval: %d for calibre, '
+                '%d for the device. %d book(s) not matched, %d device '
+                'book(s) not in the library.'
+                % (' and '.join(parts), len(plan.calibre_changes),
+                   len(plan.device_changes), len(plan.unmatched_calibre),
+                   len(plan.device_only)))
 
     def _fill(self):
         for row, (change, editable) in enumerate(self.rows):

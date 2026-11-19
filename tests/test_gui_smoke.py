@@ -360,11 +360,21 @@ class TestAppliedRowsAreShown(unittest.TestCase):
         dialog, plan, applied = self.build()
         self.assertEqual(dialog.table.rowCount(), 3)
 
-    def test_the_heading_says_they_are_coming(self):
-        dialog, _plan, applied = self.build()
-        heading = dialog.findChildren(type(dialog.table))  # table exists
-        self.assertTrue(heading)
-        self.assertEqual(len(dialog.applied), 2)
+    def test_the_heading_counts_the_automatic_ones_as_calibre_changes(self):
+        dialog, _plan, _applied = self.build()
+        text = dialog._summary()
+        self.assertIn('2 for calibre will be applied automatically', text)
+        self.assertIn('Awaiting your approval: 0 for calibre, 1 for the '
+                      'device', text)
+
+    def test_without_automatic_changes_the_plain_summary_is_used(self):
+        from calibre_plugins.pocketbook_utilities.action import FIELD_LABELS
+        from calibre_plugins.pocketbook_utilities.common.dialogs import (
+            ChangeReviewDialog)
+        _dialog, plan, _applied = self.build()
+        plain = ChangeReviewDialog(None, plan, FIELD_LABELS)
+        self.addCleanup(plain.deleteLater)
+        self.assertEqual(plain._summary(), plan.summary())
 
     def test_applied_rows_cannot_be_ticked(self):
         from qt.core import Qt
