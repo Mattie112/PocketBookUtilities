@@ -460,7 +460,8 @@ class PocketBookUtilitiesAction(InterfaceAction):
                     self.gui, runner.sub_plan(plan, needs_review),
                     FIELD_LABELS, read_only=dry_run,
                     title=('What would change' if dry_run
-                           else 'Review changes'))
+                           else 'Review changes'),
+                    applied=silent)
                 accepted = dialog.exec()
                 if dry_run:
                     return None
