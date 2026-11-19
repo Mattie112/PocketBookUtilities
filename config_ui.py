@@ -214,7 +214,22 @@ class ConfigWidget(QWidget):
             'Always show me the changes before writing them')
         self.always_review.setChecked(
             bool(self.settings.get('always_review', True)))
+        self.always_review.setToolTip(
+            'Applies when you sync from the menu. What happens when the '
+            'reader is plugged in is set below.')
         form.addRow(self.always_review)
+
+        self.on_connect = QComboBox()
+        for value, label in config_mod.ON_CONNECT_CHOICES:
+            self.on_connect.addItem(label, value)
+        index = self.on_connect.findData(
+            config_mod.on_connect_mode(self.settings))
+        self.on_connect.setCurrentIndex(max(index, 0))
+        self.on_connect.setToolTip(
+            'Nothing is shown when there is nothing to do, which is the '
+            'usual case. Books matched only by title and author are always '
+            'shown rather than applied unseen.')
+        form.addRow('When the reader is connected:', self.on_connect)
 
         self.allow_clear = QCheckBox(
             'Let an empty value overwrite a filled one')
@@ -438,8 +453,9 @@ class ConfigWidget(QWidget):
             set_debug)
         set_debug(self.debug_box.isChecked())
 
-        if self.device is None:
-            debug('no device connected; per-device settings not saved')
+        serial = config_mod.resolve_serial(self.gui.current_db, self.device)
+        if serial is None:
+            debug('no device known yet; per-device settings not saved')
             return
 
         values = {
@@ -449,6 +465,7 @@ class ConfigWidget(QWidget):
             'enabled_fields': [key for key, box in self.field_boxes.items()
                                if box.isChecked()],
             'always_review': self.always_review.isChecked(),
+            'on_connect': self.on_connect.currentData(),
             'allow_clear': self.allow_clear.isChecked(),
             'skew_seconds': self.skew.value(),
             'trust_floor': int(self.trust.currentData()),
@@ -464,9 +481,8 @@ class ConfigWidget(QWidget):
             values['eject_after_write'] = self.eject_after_write.isChecked()
         if values['columns']:
             values['configured'] = True
-        if self.device.caps is not None:
+        if self.device is not None and self.device.caps is not None:
             values['schema_fingerprint'] = self.device.caps.fingerprint
 
-        config_mod.save_device_settings(self.gui.current_db,
-                                        self.device.serial, values)
+        config_mod.save_device_settings(self.gui.current_db, serial, values)
         self.plugin_action.rebuild_menus()

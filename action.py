@@ -143,16 +143,34 @@ class PocketBookUtilitiesAction(InterfaceAction):
         settings = self.settings()
         if not settings.get('configured'):
             self.run_setup_wizard()
+            return
+        # Deferred so the connect signal returns at once, and so a device
+        # that was already plugged in does not sync before the window is up.
+        from qt.core import QTimer
+        QTimer.singleShot(1500, self._sync_on_connect)
+
+    def _sync_on_connect(self):
+        """Run the sync the user asked for when the reader is plugged in."""
+        if self.device is None:
+            return
+        settings = self.settings()
+        mode = config_mod.on_connect_mode(settings)
+        if mode not in config_mod.ON_CONNECT_ACTIVE:
+            return
+        debug('syncing on connect, mode %s' % mode)
+        self.guarded('Sync on connect failed', self._run_sync,
+                     Mode.MERGE, None, False, None, mode)
 
     def settings(self):
-        if self.device is None:
-            return dict(config_mod.DEVICE_DEFAULTS)
-        return config_mod.device_settings(self.gui.current_db,
-                                          self.device.serial)
+        return config_mod.settings_for(self.gui.current_db, self.device)
 
     def save(self, values):
-        config_mod.save_device_settings(self.gui.current_db,
-                                        self.device.serial, values)
+        serial = config_mod.resolve_serial(self.gui.current_db, self.device)
+        if serial is None:
+            debug('no device known yet; settings not saved')
+            return False
+        config_mod.save_device_settings(self.gui.current_db, serial, values)
+        return True
 
     def _check_previous_write(self):
         try:
@@ -390,7 +408,15 @@ class PocketBookUtilitiesAction(InterfaceAction):
                 'The columns exist in the library already; calibre only '
                 'picks up new columns when it starts.' % ', '.join(missing))
 
-    def _run_sync(self, mode, restrict_to, dry_run, only_fields=None):
+    def _run_sync(self, mode, restrict_to, dry_run, only_fields=None,
+                  on_connect=None):
+        """Run a sync.
+
+        *on_connect* is the automatic mode when this was triggered by
+        plugging the reader in, and ``None`` when the user asked from the
+        menu. It decides which changes are applied without being shown and
+        keeps the run quiet when there is nothing to do.
+        """
         device = self.require_device()
         settings = self.settings()
         if not dry_run:
@@ -400,6 +426,7 @@ class PocketBookUtilitiesAction(InterfaceAction):
             settings['enabled_fields'] = [
                 key for key in settings.get('enabled_fields', ())
                 if key in only_fields]
+        automatic = on_connect is not None
 
         context = runner.SyncContext(self.gui, device, settings)
         try:
@@ -407,31 +434,80 @@ class PocketBookUtilitiesAction(InterfaceAction):
             self.device = context.device
 
             if plan.is_empty:
+                if automatic:
+                    debug('nothing to do on connect')
+                    return None
                 return info_dialog(
                     self.gui, 'Nothing to do',
                     'Everything is already in step.\n\n%s' % plan.summary(),
                     show=True)
 
-            always_review = bool(settings.get('always_review', True))
-            if dry_run or always_review:
+            if automatic:
+                silent, needs_review = runner.split_for_connect(
+                    plan, on_connect)
+            else:
+                silent, needs_review = [], list(plan.all_changes)
+
+            # An automatic run always shows whatever the split held back;
+            # that is the whole point of holding it back. A manual run shows
+            # everything unless the user turned review off.
+            show_review = needs_review and (
+                dry_run or automatic
+                or settings.get('always_review', True))
+
+            if show_review:
                 dialog = ChangeReviewDialog(
-                    self.gui, plan, FIELD_LABELS, read_only=dry_run,
+                    self.gui, runner.sub_plan(plan, needs_review),
+                    FIELD_LABELS, read_only=dry_run,
                     title=('What would change' if dry_run
-                           else 'Review changes'))
-                if not dialog.exec() or dry_run:
+                           else 'Review changes'),
+                    applied=silent)
+                accepted = dialog.exec()
+                if dry_run:
                     return None
+                if not accepted:
+                    # Cancelling refuses the changes shown. Anything the
+                    # user already chose to apply automatically still goes
+                    # ahead, which is what they asked for.
+                    for change in needs_review:
+                        change.selected = False
+            elif needs_review:
+                silent = silent + needs_review
+                needs_review = []
+
+            # Identity, not equality: two changes can hold identical values.
+            silent_ids = {id(c) for c in silent}
+            reviewed_ids = {id(c) for c in needs_review}
+            for change in plan.all_changes:
+                if id(change) in silent_ids:
+                    change.selected = True
+                elif id(change) not in reviewed_ids:
+                    change.selected = False
+
+            if not runner.has_selected_changes(plan):
+                return None
 
             calibre_written, device_written = context.apply()
             ejected = False
             if device_written and settings.get('eject_after_write'):
                 ejected = self._eject()
-            info_dialog(self.gui, 'Sync finished',
-                        runner.completion_message(calibre_written,
-                                                  device_written, ejected),
-                        show=True)
+            message = runner.completion_message(calibre_written,
+                                                device_written, ejected)
+            if automatic and not device_written:
+                # A quiet load is what was asked for; say so in the status
+                # bar rather than interrupting.
+                self._status(message.splitlines()[0])
+            else:
+                info_dialog(self.gui, 'Sync finished', message, show=True)
         finally:
             context.close()
         return None
+
+    def _status(self, message):
+        try:
+            self.gui.status_bar.show_message('PocketBook: ' + message, 8000)
+        except Exception as err:
+            debug('could not show a status message: %s' % err)
 
     def _eject(self):
         try:

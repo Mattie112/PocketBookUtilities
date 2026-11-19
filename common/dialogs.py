@@ -200,11 +200,17 @@ class ChangeReviewDialog(CheckTableDialog):
     """Lists every proposed change and lets the user veto any of them."""
 
     def __init__(self, parent, plan, field_labels, read_only=False,
-                 title='Review changes'):
+                 title='Review changes', applied=None):
         QDialog.__init__(self, parent)
         self.plan = plan
         self.read_only = read_only
         self.field_labels = field_labels
+        # Changes the user asked to have applied without approving, shown
+        # so this dialog accounts for the whole sync. They are applied when
+        # it closes, whichever button is pressed: reporting "0 changes for
+        # calibre" while three were about to be made was worse than saying
+        # nothing at all.
+        self.applied = list(applied or ())
         # Sorted by book, then by field, so a book's changes stay together
         # and the order is something the reader can predict. Clicking a
         # column header re-sorts.
@@ -216,16 +222,28 @@ class ChangeReviewDialog(CheckTableDialog):
         # thinks in.
         order = {key: index for index, key in enumerate(field_labels)}
         last = len(order)
+
+        def sort_key(change):
+            return ((change.link.title or '').casefold(),
+                    order.get(change.field, last),
+                    field_labels.get(change.field, change.field))
+
         self.changes = sorted(
             list(plan.calibre_changes) + list(plan.device_changes),
-            key=lambda c: ((c.link.title or '').casefold(),
-                           order.get(c.field, last),
-                           field_labels.get(c.field, c.field)))
+            key=sort_key)
+        # Already-applied rows sit among the rest, so one book's whole story
+        # is in one place rather than split across two lists.
+        self.rows = sorted(
+            [(c, True) for c in self.changes]
+            + [(c, False) for c in self.applied],
+            key=lambda pair: sort_key(pair[0]))
+        # Identity, not equality: two changes can hold identical values.
+        self._index_of = {id(c): i for i, c in enumerate(self.changes)}
 
         self.setWindowTitle(title)
         layout = QVBoxLayout(self)
 
-        heading = QLabel(plan.summary())
+        heading = QLabel(self._summary())
         heading.setWordWrap(True)
         layout.addWidget(heading)
 
@@ -239,7 +257,7 @@ class ChangeReviewDialog(CheckTableDialog):
             note.setStyleSheet('color: palette(mid);')
             layout.addWidget(note)
 
-        self.table = self._make_table(len(self.changes), COLUMNS)
+        self.table = self._make_table(len(self.rows), COLUMNS)
         self._fill()
         self._finish_table(self.table, (TITLE_COL, WHY_COL))
         layout.addWidget(self.table)
@@ -259,15 +277,53 @@ class ChangeReviewDialog(CheckTableDialog):
         layout.addWidget(buttons)
         self.resize(QSize(1000, 600))
 
+    def _summary(self):
+        """One account of the sync, not one per slice.
+
+        Counting only the rows awaiting approval put "3 will be applied
+        automatically" next to "0 change(s) for calibre", when all three
+        of them were for calibre.
+        """
+        plan = self.plan
+        if not self.applied:
+            return plan.summary()
+
+        to_calibre = sum(1 for c in self.applied
+                         if c.direction is Side.CALIBRE)
+        to_device = len(self.applied) - to_calibre
+        parts = []
+        if to_calibre:
+            parts.append('%d for calibre' % to_calibre)
+        if to_device:
+            parts.append('%d for the device' % to_device)
+        return ('%s will be applied automatically, whether or not you '
+                'approve the rest. Awaiting your approval: %d for calibre, '
+                '%d for the device. %d book(s) not matched, %d device '
+                'book(s) not in the library.'
+                % (' and '.join(parts), len(plan.calibre_changes),
+                   len(plan.device_changes), len(plan.unmatched_calibre),
+                   len(plan.device_only)))
+
     def _fill(self):
-        for row, change in enumerate(self.changes):
-            self.table.setItem(row, CHECK_COL, self._check_item(
-                row, checked=change.selected,
-                checkable=not self.read_only))
+        for row, (change, editable) in enumerate(self.rows):
+            if editable:
+                index = self._index_of[id(change)]
+                self.table.setItem(row, CHECK_COL, self._check_item(
+                    index, checked=change.selected,
+                    checkable=not self.read_only))
+            else:
+                done = QTableWidgetItem('auto')
+                done.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                done.setToolTip('Applied automatically; not yours to '
+                                'approve, as you asked.')
+                self.table.setItem(row, CHECK_COL, done)
 
             title = QTableWidgetItem(change.link.title or
                                      str(change.link.calibre_id))
-            if not change.link.is_trusted:
+            if not editable:
+                title.setToolTip('Applied automatically when this dialog '
+                                 'closes, as you asked.')
+            elif not change.link.is_trusted:
                 title.setToolTip(
                     'Matched to the device only by %s, so this is unticked '
                     'by default.' % change.link.confidence.label)
@@ -286,7 +342,10 @@ class ChangeReviewDialog(CheckTableDialog):
                 row, NEW_COL, QTableWidgetItem(format_value(
                     change.display_new)))
 
-            why = QTableWidgetItem(change.reason)
+            reason = change.reason
+            if not editable:
+                reason = 'automatic — %s' % reason
+            why = QTableWidgetItem(reason)
             if 'newer' in change.reason or 'same time' in change.reason:
                 why.setToolTip('Both sides changed since the last sync.')
             self.table.setItem(row, WHY_COL, why)

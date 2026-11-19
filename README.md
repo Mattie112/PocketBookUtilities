@@ -120,7 +120,9 @@ blocked until you do, with a message saying which columns it's waiting for.)
 Then use **Sync now (review changes)**.
 
 Nothing is written until you've seen the list of proposed changes and pressed
-*Apply selected*.
+*Apply selected*. That stays true unless you turn on one of the automatic
+modes described under
+[Syncing when you plug the reader in](#syncing-when-you-plug-the-reader-in).
 
 ## How conflicts are resolved
 
@@ -143,6 +145,43 @@ side to win outright.
 Each proposed change shows its direction and why it was chosen. Books matched
 by title and author rather than by file path are listed unticked, since those
 matches are less certain.
+
+## Syncing when you plug the reader in
+
+By default nothing happens on connect; you sync from the menu. The Sync tab
+has one setting if you'd rather it ran by itself:
+
+| Setting | What happens on plug-in |
+|---|---|
+| Do not sync automatically | Nothing. *(default)* |
+| Sync automatically, ask before applying anything | Shows the review dialog, both directions. |
+| Sync automatically, apply reader → calibre without asking, ask about the rest | Loads reading state silently. Still asks about anything bound for the device. |
+| Sync automatically, apply everything without asking | Applies everything. A backup is taken first, as with any write. |
+
+The third is the one worth using. Reading status, progress and positions only
+ever change on the reader, they change constantly, and loading them cannot
+touch the device — so approving that by hand every time is friction without
+any safety gained. Anything heading *to* the reader still stops for you.
+
+Two things keep it from becoming a nuisance:
+
+* **It is silent when there is nothing to do**, which the merge above makes
+  the usual case. No dialog, no message.
+* **A book matched only by title and author is never applied unseen**, in any
+  mode. Those appear in the dialog instead. That's how the wrong book would
+  otherwise get a reading position.
+
+When a sync both loads silently and has something to ask about, the dialog
+lists both: the automatic changes are shown marked `auto` rather than with a
+tick box, so one book's whole story is in one place. They are applied whether
+or not you approve the rest, and the heading says so. Cancelling declines the
+changes shown this time, not for good — they come back on the next sync.
+
+A silent load reports itself in the status bar, which calibre also shows as a
+desktop notification.
+
+One rough edge: building the plan reads your whole library, so connecting
+pauses calibre for a few seconds before anything appears.
 
 ## Collections
 

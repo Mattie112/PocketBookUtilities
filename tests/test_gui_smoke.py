@@ -319,3 +319,82 @@ class TestMetadataReviewDialog(unittest.TestCase):
         titles = [dialog.table.item(r, 1).text()
                   for r in range(dialog.table.rowCount())]
         self.assertEqual(titles, sorted(titles, key=str.casefold))
+
+
+class TestAppliedRowsAreShown(unittest.TestCase):
+    """A sync that applies half of itself silently must still account for it.
+
+    The dialog reported "0 change(s) for calibre" while three calibre
+    changes were about to be made automatically, because it described only
+    the slice it was showing.
+    """
+
+    def build(self):
+        from calibre_plugins.pocketbook_utilities.action import FIELD_LABELS
+        from calibre_plugins.pocketbook_utilities.common.dialogs import (
+            ChangeReviewDialog)
+        from calibre_plugins.pocketbook_utilities.sync.model import (
+            BookLink, MatchConfidence, ProposedChange, Side, SyncPlan)
+
+        link = BookLink(calibre_id=1, device_book_id=1, lpath='',
+                        device_path='', title='Operation Bounce House',
+                        confidence=MatchConfidence.EXACT_PATH)
+        plan = SyncPlan()
+        plan.device_changes.append(ProposedChange(
+            link=link, field='favourite', direction=Side.DEVICE,
+            old=False, new=1, reason='changed in calibre'))
+        applied = [
+            ProposedChange(link=link, field='progress',
+                           direction=Side.CALIBRE, old=None, new=43.67,
+                           reason='changed on the device'),
+            ProposedChange(link=link, field='position',
+                           direction=Side.CALIBRE, old=None, new='pbr:/x',
+                           reason='changed on the device'),
+        ]
+        dialog = ChangeReviewDialog(None, plan, FIELD_LABELS,
+                                    applied=applied)
+        self.addCleanup(dialog.deleteLater)
+        return dialog, plan, applied
+
+    def test_applied_changes_get_rows_too(self):
+        dialog, plan, applied = self.build()
+        self.assertEqual(dialog.table.rowCount(), 3)
+
+    def test_the_heading_counts_the_automatic_ones_as_calibre_changes(self):
+        dialog, _plan, _applied = self.build()
+        text = dialog._summary()
+        self.assertIn('2 for calibre will be applied automatically', text)
+        self.assertIn('Awaiting your approval: 0 for calibre, 1 for the '
+                      'device', text)
+
+    def test_without_automatic_changes_the_plain_summary_is_used(self):
+        from calibre_plugins.pocketbook_utilities.action import FIELD_LABELS
+        from calibre_plugins.pocketbook_utilities.common.dialogs import (
+            ChangeReviewDialog)
+        _dialog, plan, _applied = self.build()
+        plain = ChangeReviewDialog(None, plan, FIELD_LABELS)
+        self.addCleanup(plain.deleteLater)
+        self.assertEqual(plain._summary(), plan.summary())
+
+    def test_applied_rows_cannot_be_ticked(self):
+        from qt.core import Qt
+        dialog, _plan, _applied = self.build()
+        checkable = 0
+        for row in range(dialog.table.rowCount()):
+            item = dialog.table.item(row, 0)
+            if item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                checkable += 1
+        self.assertEqual(checkable, 1, 'only the real change is approvable')
+
+    def test_applying_selection_ignores_them(self):
+        dialog, plan, applied = self.build()
+        dialog.apply_selection()
+        self.assertTrue(plan.device_changes[0].selected)
+        # The automatic ones are applied by the caller, not by this dialog.
+        self.assertEqual(len(dialog.changes), 1)
+
+    def test_rows_stay_grouped_by_book(self):
+        dialog, _plan, _applied = self.build()
+        titles = [dialog.table.item(r, 1).text()
+                  for r in range(dialog.table.rowCount())]
+        self.assertEqual(len(set(titles)), 1)
