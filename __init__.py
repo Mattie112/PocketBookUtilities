@@ -19,7 +19,7 @@ class PocketBookUtilities(InterfaceActionBase):
                    'favourites and collections with a PocketBook reader, '
                    'and fix the author information it sorts by.')
     supported_platforms = ['windows', 'osx', 'linux']
-    author = 'Matthijs'
+    author = 'Mattie112'
     version = PLUGIN_VERSION
     minimum_calibre_version = (5, 35, 0)
 

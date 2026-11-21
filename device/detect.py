@@ -100,7 +100,7 @@ def read_driveinfo(prefix):
 def read_current_profile_name(prefix):
     """The active profile name from ``system/profiles/.current.lnk``.
 
-    The file holds a path such as ``/mnt/ext1/system/profiles/Matthijs`` and
+    The file holds a path such as ``/mnt/ext1/system/profiles/Mattie112`` and
     ends with a newline. Not stripping that newline is what made the previous
     plugin fail to find the profile row at all.
     """

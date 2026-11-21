@@ -195,10 +195,10 @@ def build_fixture(dest, books=None, caps_drop=(), with_card=True,
         prof_dir = os.path.join(dest, 'system', 'profiles')
         os.makedirs(prof_dir, exist_ok=True)
         with open(os.path.join(prof_dir, '.current.lnk'), 'wb') as handle:
-            handle.write((DEVICE_ROOT + '/system/profiles/Matthijs\n')
+            handle.write((DEVICE_ROOT + '/system/profiles/Mattie112\n')
                          .encode('utf-8'))
         if with_cr3hist:
-            cr3 = os.path.join(prof_dir, 'Matthijs', 'state', 'cr3')
+            cr3 = os.path.join(prof_dir, 'Mattie112', 'state', 'cr3')
             os.makedirs(cr3, exist_ok=True)
             with open(os.path.join(cr3, '.cr3hist'), 'w',
                       encoding='utf-8') as handle:
@@ -215,7 +215,7 @@ def build_fixture(dest, books=None, caps_drop=(), with_card=True,
         conn.execute('INSERT INTO storages (id, type, name, sync_account_id) '
                      'VALUES (2, 2, ?, NULL)', ('SDCard1',))
     conn.execute('INSERT INTO profiles (id, name) VALUES (1, ?)',
-                 ('Matthijs' if with_profiles else 'default',))
+                 ('Mattie112' if with_profiles else 'default',))
 
     folder_ids = {}
     next_folder = 1
