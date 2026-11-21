@@ -63,5 +63,5 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
-          files: PocketBook Utilities.zip
+          files: PocketBook Utilities v*.zip
           fail_on_unmatched_files: true

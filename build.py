@@ -2,21 +2,27 @@
 
     & "C:\\Program Files\\Calibre2\\calibre-debug.exe" -e build.py
 
-Produces ``PocketBook Utilities.zip`` next to this file. Tests, caches and
-the git directory are left out.
+Produces ``PocketBook Utilities v<version>.zip`` next to this file, so a
+downloaded file says which version it is without being opened. Tests,
+caches and the git directory are left out.
 """
 
 import ast
+import glob
 import os
 import re
 import sys
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUTPUT = os.path.join(HERE, 'PocketBook Utilities.zip')
+NAME = 'PocketBook Utilities'
+
+#: Matches any build, whatever its version, for cleaning up and for the
+#: workflows to pick the file up without knowing the number.
+OUTPUT_GLOB = os.path.join(HERE, '%s v*.zip' % NAME)
 
 EXCLUDE_DIRS = {'tests', '__pycache__'}
-EXCLUDE_FILES = {'build.py', 'PocketBook Utilities.zip'}
+EXCLUDE_FILES = {'build.py'}
 EXCLUDE_SUFFIXES = ('.pyc', '.pyo', '.zip', '.orig', '.rej')
 
 
@@ -41,11 +47,25 @@ def files_to_pack():
             yield full, os.path.relpath(full, HERE).replace('\\', '/')
 
 
+def output_path():
+    """Where this build lands. Read after any --set-version, not before.
+
+    The version is part of the name, so the file someone downloaded can be
+    identified without opening it, and it matches what calibre shows in its
+    plugin list.
+    """
+    return os.path.join(HERE, '%s v%s.zip' % (NAME, version_string()))
+
+
 def build():
-    if os.path.exists(OUTPUT):
-        os.remove(OUTPUT)
+    # Clear out earlier builds so exactly one zip is left and a release
+    # cannot pick up a stale one.
+    for stale in glob.glob(OUTPUT_GLOB):
+        os.remove(stale)
+
+    output = output_path()
     packed = []
-    with zipfile.ZipFile(OUTPUT, 'w', zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
         for full, arcname in files_to_pack():
             archive.write(full, arcname)
             packed.append(arcname)
@@ -57,10 +77,10 @@ def build():
         raise SystemExit('__init__.py is missing from the zip')
 
     print('%s  (%d files, %.1f KB)'
-          % (OUTPUT, len(packed), os.path.getsize(OUTPUT) / 1024.0))
+          % (output, len(packed), os.path.getsize(output) / 1024.0))
     for name in packed:
         print('   ', name)
-    return OUTPUT
+    return output
 
 
 def plugin_version():

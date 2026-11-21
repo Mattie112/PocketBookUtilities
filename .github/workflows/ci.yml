@@ -76,5 +76,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: pocketbook-utilities-zip
-          path: PocketBook Utilities.zip
+          path: PocketBook Utilities v*.zip
           if-no-files-found: error
