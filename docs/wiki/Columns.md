@@ -17,7 +17,7 @@ creates all of them in one pass.
 | PB Position | `#pb_position` | Text | both ways | Reading position, an EPUB CFI wrapped in a `pbr:` URI |
 | PB Collections | `#pb_collections` | Text, comma separated | both ways | Collections the book is in on the reader |
 
-<!-- screenshot: columns.png -- the library view with the PB columns visible -->
+![The columns in the library view](https://raw.githubusercontent.com/Mattie112/PocketBookUtilities/main/docs/screenshots/library.png)
 
 ## Why the read date and progress only come back one way
 

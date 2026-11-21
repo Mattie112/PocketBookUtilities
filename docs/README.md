@@ -48,35 +48,36 @@ off.
 
 ## Screenshots
 
-### Generated
+All of them are generated:
 
     & "C:\Program Files\Calibre2\calibre-debug.exe" -e docs\make_screenshots.py
 
-Builds the plugin's own dialogs with invented books and grabs each one. The
-widgets are laid out off-screen, so no window appears and no reader has to be
-plugged in. Re-run it when a dialog changes.
+The widgets are laid out off-screen, so no window appears on the desktop and
+no reader has to be plugged in. Re-run it whenever a dialog changes, and
+commit what comes out.
 
 | File | Shows |
 |---|---|
-| `review.png` | The review dialog, with changes in both directions, an already-applied pair and an unticked weak match |
+| `review.png` | The review dialog: changes in both directions, an already-applied pair, an unticked weak match |
 | `wizard.png` | The first-run setup dialog with its column preview |
 | `settings-device.png` | The settings dialog, Device tab |
 | `settings-sync.png` | The settings dialog, Sync tab |
+| `menu.png` | The toolbar menu with the *Send to device* submenu beside it |
+| `library.png` | calibre's library view with the `PB *` columns |
 
-The books in them are made up. Screenshots of a real library put its contents
-in a public repository, and the pages only need something plausible on
-screen.
+The books in them are invented. Screenshots of a real library put its
+contents in a public repository, and the pages only need something plausible
+on screen.
 
-### Still to be taken by hand
+Two of these are not the plugin's own widgets, which is worth knowing before
+changing them:
 
-These are calibre showing its own windows, which the script cannot build.
-Drop the file into `screenshots/` and replace the matching
-`<!-- screenshot: ... -->` comment in the page with an image tag.
-
-| File | Shot | Wanted by |
-|---|---|---|
-| `menu.png` | The toolbar button's drop-down, open, with the reader connected so nothing is greyed out. One submenu expanded if you can manage it. | `Home`, `Menu-reference` |
-| `columns.png` | Four or five library rows with the `PB *` columns showing — read ticks, a progress percentage, a collection or two. | `Columns` |
-
-Crop to the window rather than the whole desktop. These two will show real
-book titles, so use books you are happy to have in a public repository.
+* **menu.png** calls `rebuild_menus` unbound against a stand-in that reports
+  a connected, configured device and a few selected books, so the menu is the
+  real one with nothing greyed out. Qt draws a submenu as a popup of its own,
+  so the two are grabbed separately and composited at the row the submenu
+  belongs to.
+* **library.png** builds a scratch library, runs the plugin's own
+  `ensure_columns` on it, adds five books and renders calibre's `BooksView`
+  against it with the unrelated columns hidden. `BooksView` reaches into
+  `gui.iactions` for its context menu, which `_stub_parent` supplies.
