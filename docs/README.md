@@ -7,26 +7,44 @@ Not shipped in the plugin zip. `build.py` skips this directory.
 * `screenshots/` — images used by the wiki and the main README.
 * `make_screenshots.py` — regenerates most of those images.
 
+The wiki pages are published from here automatically; see below.
+
 ## Publishing the wiki
 
-The wiki is a separate git repository. It has to exist before it can be
-cloned, so if there is no wiki yet, create any one page through the web
-interface first.
+Automatic. `.github/workflows/publish-wiki.yml` copies `docs/wiki/*.md` into
+the wiki's own repository whenever `docs/wiki` changes on `main`, so merging a
+pull request is all it takes. It can also be run by hand from the Actions tab.
 
-    git clone https://github.com/Mattie112/PocketBookUtilities.wiki.git
-    cp docs/wiki/*.md PocketBookUtilities.wiki/
-    cd PocketBookUtilities.wiki
-    git add -A && git commit -m "Update wiki" && git push
+Keeping the source here means a change to the plugin and the change to its
+documentation go through one review, and the wiki cannot quietly drift away
+from the code. The cost is that the wiki is a *copy*: a page edited in the
+browser is overwritten on the next publish. `Home.md` and the sidebar both say
+so.
+
+The workflow pushes with the automatic `GITHUB_TOKEN` and a `contents: write`
+permission. No personal access token and no repository secret are involved;
+a PAT would only be needed to write into some *other* repository's wiki.
 
 Page names come from the filenames: `How-syncing-works.md` becomes the page
 *How syncing works* at `/wiki/How-syncing-works`, which is what the links
 between pages use. `_Sidebar.md` is the navigation shown beside every page.
-
-Keeping the source here means the wiki is reviewable in a pull request and
-cannot drift away unnoticed. Edit it here, then copy it over.
+Markdown deleted from `docs/wiki` is deleted from the wiki too.
 
 Wiki pages reference images by their full raw URL, because a wiki page cannot
 see this repository's files. The main README uses a relative path.
+
+### Starting a wiki from scratch
+
+The wiki repository does not exist until one page has been saved through the
+web interface, and the workflow cannot create it. If the clone step ever fails
+with a repository-not-found error, that is why: open the repository's **Wiki**
+tab, **Create the first page**, save anything, and re-run the workflow. The
+placeholder is replaced by `Home.md` on the first publish.
+
+An empty wiki is also invisible from outside — GitHub hides the Wiki tab and
+serves the repository home page at `/wiki` to anyone who cannot create pages,
+which makes a wiki that exists but has no pages look like one that is switched
+off.
 
 ## Screenshots
 

@@ -58,3 +58,12 @@ collection flags the membership as deleted, the way the firmware does.
 
 If you are reporting a problem, [Troubleshooting](Troubleshooting) says which
 three things to include.
+
+## About these pages
+
+They are published automatically from
+[docs/wiki](https://github.com/Mattie112/PocketBookUtilities/tree/main/docs/wiki)
+in the repository, so a change to the plugin and the change to its
+documentation go through the same review. Editing a page here is overwritten
+on the next publish; corrections are welcome as a pull request against that
+folder.
