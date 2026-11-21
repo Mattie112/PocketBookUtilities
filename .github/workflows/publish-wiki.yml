@@ -1,0 +1,74 @@
+name: Publish the wiki
+
+# The wiki pages live in docs/wiki so they are reviewable in a pull request
+# alongside the code they describe. GitHub cannot serve a wiki from a folder
+# in the repository, so this copies them into the wiki's own repository
+# whenever main changes.
+#
+# That makes the wiki a copy, not the source: a page edited in the browser is
+# overwritten the next time this runs. Edit docs/wiki instead.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/wiki/**'
+      - '.github/workflows/publish-wiki.yml'
+  workflow_dispatch:
+
+# contents: write is what lets the automatic token push to <repo>.wiki.git.
+# A personal access token is only needed to write into a *different*
+# repository's wiki, which this does not do, so there is no secret to add.
+permissions:
+  contents: write
+
+# Two merges in quick succession must not race each other into the same
+# wiki repository.
+concurrency:
+  group: publish-wiki
+
+jobs:
+  publish:
+    name: Copy docs/wiki into the wiki
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Publish
+        env:
+          # Through the environment rather than interpolated into the script,
+          # for the same reason as the PR comment in ci.yml. GitHub masks the
+          # token in the log either way.
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # The wiki repository does not exist until one page has been
+          # created through the web interface. Until then this clone fails,
+          # which is a clearer signal than an empty success.
+          git clone -q \
+            "https://x-access-token:${TOKEN}@github.com/${REPO}.wiki.git" wiki
+
+          # A page deleted from docs/wiki should disappear from the wiki too,
+          # so the markdown there is cleared first. Anything else the wiki
+          # holds -- images uploaded through the browser, say -- is left
+          # alone.
+          find wiki -maxdepth 1 -name '*.md' -delete
+          cp docs/wiki/*.md wiki/
+
+          cd wiki
+          git config user.name 'github-actions[bot]'
+          git config user.email \
+            '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+
+          if git diff --quiet --cached; then
+            echo "The wiki already matches docs/wiki; nothing to push."
+            exit 0
+          fi
+
+          git commit -q -m "Publish docs/wiki from ${SHA:0:7}"
+          git push -q
+          echo "Wiki updated from ${SHA:0:7}."

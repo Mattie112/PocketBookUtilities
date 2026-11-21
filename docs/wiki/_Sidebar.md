@@ -16,3 +16,7 @@
 **Keeping it safe**
 * [Backups and safety](Backups-and-safety)
 * [Troubleshooting](Troubleshooting)
+
+---
+
+_Published from `docs/wiki` in the repository._
