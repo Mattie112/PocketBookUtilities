@@ -9,6 +9,10 @@ calibre library, and can fix the author information PocketBook sorts by.
 Think of it as the PocketBook equivalent of
 [Kobo Utilities](https://github.com/janlarres/kobo-utilities).
 
+Questions, bug reports and "it works on my PocketBook X" are welcome either in
+the [issue tracker](https://github.com/Mattie112/PocketBookUtilities/issues) or
+in the [MobileRead thread](https://www.mobileread.com/forums/showthread.php?t=376388).
+
 > **Written with AI assistance.** Most of this code, and this README, were
 > produced by Claude (Anthropic) working from my direction, and the commits
 > carry a `Co-Authored-By` trailer saying so. It isn't unreviewed output: it
@@ -87,9 +91,10 @@ CoolReader positions (`.cr3hist`) are detected but not implemented. The test
 device reads EPUBs with the native engine, which keeps position in the
 database.
 
-If you run this on a different PocketBook, please open an issue with the
-output of **Show device information**. It contains the model, schema version
-and capability flags, and no titles or file paths.
+If you run this on a different PocketBook, please open an issue or post in the
+[MobileRead thread](https://www.mobileread.com/forums/showthread.php?t=376388)
+with the output of **Show device information**. It contains the model, schema
+version and capability flags, and no titles or file paths.
 
 ## Requirements
 
