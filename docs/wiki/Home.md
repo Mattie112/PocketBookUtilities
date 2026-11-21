@@ -4,7 +4,7 @@ A calibre plugin that keeps reading status, reading position, progress,
 favourites and collections in step between a PocketBook e-reader and a calibre
 library, and can repair the author information the reader sorts by.
 
-<!-- screenshot: menu.png -- the plugin's drop-down menu, device connected -->
+![The plugin's menu, with the device connected](https://raw.githubusercontent.com/Mattie112/PocketBookUtilities/main/docs/screenshots/menu.png)
 ![The review dialog, listing what a sync proposes in each direction](https://raw.githubusercontent.com/Mattie112/PocketBookUtilities/main/docs/screenshots/review.png)
 
 ## Start here

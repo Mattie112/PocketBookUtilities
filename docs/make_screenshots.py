@@ -252,6 +252,183 @@ def shoot_settings(app):
         shutil.rmtree(path, ignore_errors=True)
 
 
+def _stub_parent():
+    """The little calibre asks of whatever owns a view or a menu.
+
+    ``BooksView`` reaches into ``gui.iactions`` for the toolbar actions it
+    puts in its own context menu. None of them are pressed here, so an
+    object that answers to anything is enough.
+    """
+    from qt.core import QAction, QWidget
+
+    class _Stub:
+        def __init__(self):
+            self.qaction = QAction()
+
+        def __getattr__(self, name):
+            return lambda *a, **k: None
+
+    class _Actions(dict):
+        def __missing__(self, key):
+            value = _Stub()
+            self[key] = value
+            return value
+
+    parent = QWidget()
+    parent.iactions = _Actions()
+    return parent
+
+
+def _lay_out(widget, size=None):
+    from qt.core import QApplication, QSize, Qt
+
+    widget.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+    widget.show()
+    QApplication.processEvents()
+    widget.resize(QSize(*size) if size else widget.sizeHint())
+    QApplication.processEvents()
+    return widget
+
+
+def shoot_menu(app):
+    """The toolbar menu, with one submenu open beside it.
+
+    ``rebuild_menus`` is called unbound against a stand-in, so this is the
+    real menu the plugin builds -- same entries, same separators, same
+    enabling rules -- rather than a drawing of one. The stand-in reports a
+    connected, configured device and a few selected books, which is the
+    state in which nothing is greyed out.
+    """
+    from qt.core import QMenu, QPainter, QPixmap, Qt
+
+    from calibre_plugins.pocketbook_utilities.action import (
+        PocketBookUtilitiesAction as Action)
+
+    stand_in = type('MenuOwner', (), {})()
+    stand_in.menu = QMenu()
+    stand_in.device = DocsDevice()
+    stand_in.settings = lambda: {'configured': True}
+    stand_in._selected_ids = lambda: [1, 2, 3]
+    for name in ('sync_now', 'sync_selected', 'forced_sync', 'push_metadata',
+                 'show_device_info', 'show_device_only', 'check_database',
+                 'backup_now', 'restore_backup', 'verify_write',
+                 'setup_columns', 'show_configuration'):
+        setattr(stand_in, name, lambda *a, **k: None)
+
+    Action.rebuild_menus(stand_in)
+    menu = _lay_out(stand_in.menu)
+
+    # Qt draws a submenu as a popup of its own, so the two are grabbed
+    # separately and put back together at the row the submenu belongs to.
+    parent_action = next(a for a in menu.actions()
+                         if a.text() == 'Send to device')
+    submenu = _lay_out(parent_action.menu())
+
+    main_shot, sub_shot = menu.grab(), submenu.grab()
+    row = menu.actionGeometry(parent_action)
+    left, top = main_shot.width() - 3, row.top()
+
+    canvas = QPixmap(left + sub_shot.width(),
+                     max(main_shot.height(), top + sub_shot.height()))
+    canvas.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(canvas)
+    painter.drawPixmap(0, 0, main_shot)
+    painter.drawPixmap(left, top, sub_shot)
+    painter.end()
+
+    path = os.path.join(OUT, 'menu.png')
+    if not canvas.save(path, 'PNG'):
+        raise SystemExit('could not write %s' % path)
+    print('%-22s %6.1f KB' % ('menu.png', os.path.getsize(path) / 1024.0))
+    menu.hide()
+    submenu.hide()
+
+
+#: Title, author, series index, read, progress, collections, days since read.
+LIBRARY_ROWS = (
+    ('Dungeon Crawler Carl', 1, True, 100.0, ['Finished', 'LitRPG'], 34),
+    ("Carl's Doomsday Scenario", 2, True, 100.0, ['Finished', 'LitRPG'], 21),
+    ("The Dungeon Anarchist's Cookbook", 3, False, 64.0,
+     ['LitRPG', 'Reading now'], 0),
+    ('The Gate of the Feral Gods', 4, False, 8.0, ['LitRPG'], 2),
+    ("The Butcher's Masquerade", 5, None, None, ['LitRPG'], None),
+)
+
+#: What the library shot shows. The rest of calibre's columns are hidden,
+#: because the point is the seven the plugin adds, not a wide empty table.
+LIBRARY_COLUMNS = ('title', 'authors', 'series', '#pb_collections',
+                   '#pb_last_read', '#pb_progress', '#pb_read')
+
+
+def shoot_library(app):
+    """calibre's own library view, against a scratch library.
+
+    The columns are made by the plugin's own ``ensure_columns``, so what is
+    on screen is what a reader gets after running the setup, down to the
+    tick icons and the percentage format.
+    """
+    import datetime
+    import shutil
+    import tempfile
+
+    from calibre.db.legacy import LibraryDatabase
+    from calibre.ebooks.metadata.book.base import Metadata
+    from calibre.gui2.library.views import BooksView
+    from calibre.utils.date import utcnow
+    from qt.core import Qt
+
+    from calibre_plugins.pocketbook_utilities import columns as columns_mod
+
+    path = tempfile.mkdtemp(prefix='pbutil-shots-')
+    db = LibraryDatabase(path)
+    try:
+        mapping = columns_mod.ensure_columns(db).mapping
+        db.close()
+        # Reopened so the new columns are part of the schema the view sees.
+        db = LibraryDatabase(path)
+
+        now = utcnow()
+        for title, index, read, progress, collections, ago in LIBRARY_ROWS:
+            metadata = Metadata(title, ['Matt Dinniman'])
+            metadata.series = 'Dungeon Crawler Carl'
+            metadata.series_index = index
+            book_id = db.new_api.add_books([(metadata, {})])[0][0]
+
+            values = {mapping['collections']: collections}
+            if read is not None:
+                values[mapping['read']] = read
+            if progress is not None:
+                values[mapping['progress']] = progress
+            if ago is not None:
+                values[mapping['last_read']] = (
+                    now - datetime.timedelta(days=ago, hours=3))
+            for lookup, value in values.items():
+                db.new_api.set_field(lookup, {book_id: value})
+
+        # new_api writes behind the legacy object the view reads through.
+        db.refresh()
+
+        parent = _stub_parent()
+        view = BooksView(parent)
+        view.set_database(db)
+        for index, name in enumerate(view.column_map):
+            view.setColumnHidden(index, name not in LIBRARY_COLUMNS)
+        view.model().sort(view.column_map.index('series'),
+                          Qt.SortOrder.AscendingOrder)
+        view.resizeColumnsToContents()
+        view.clearSelection()
+
+        grab(view, 'library.png', (1100, 192))
+        view.deleteLater()
+        parent.deleteLater()
+    finally:
+        try:
+            db.close()
+        except Exception as err:
+            print('could not close the scratch library: %s' % err)
+        shutil.rmtree(path, ignore_errors=True)
+
+
 def main():
     from calibre.gui2 import Application
     from qt.core import QApplication
@@ -262,6 +439,8 @@ def main():
     shoot_review(app)
     shoot_wizard(app)
     shoot_settings(app)
+    shoot_menu(app)
+    shoot_library(app)
     print('\nwritten to %s' % OUT)
 
 

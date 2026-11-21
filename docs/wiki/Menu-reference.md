@@ -4,7 +4,7 @@ Everything the plugin does is on the toolbar button's drop-down menu. Items
 that cannot be used right now are greyed out with the reason in their
 tooltip, rather than disappearing.
 
-<!-- screenshot: menu.png -- the drop-down menu with a device connected -->
+![The plugin's menu, with the device connected](https://raw.githubusercontent.com/Mattie112/PocketBookUtilities/main/docs/screenshots/menu.png)
 
 Two conditions decide most of it:
 
