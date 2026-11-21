@@ -105,11 +105,11 @@ class TestProfiles(FixtureTestCase):
 
     def test_current_lnk_trailing_newline_is_stripped(self):
         name = detect.read_current_profile_name(self.prefix)
-        self.assertEqual(name, 'Matthijs')
+        self.assertEqual(name, 'Mattie112')
 
     def test_profile_id_resolves_by_name(self):
         device = detect.describe_path(self.prefix)
-        self.assertEqual(device.profile_name, 'Matthijs')
+        self.assertEqual(device.profile_name, 'Mattie112')
         self.assertEqual(device.profile_id, 1)
 
     def test_coolreader_detected_only_when_the_file_exists(self):
