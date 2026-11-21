@@ -284,6 +284,15 @@ python build.py --version               # the version the zip will report
 CI runs both: the first on plain Python across 3.10 to 3.13, the second on
 a runner with calibre installed, under `xvfb`.
 
+### Testing a pull request
+
+Every pull request builds the plugin zip, named after the version, PR and
+commit (`PocketBook Utilities v0.0.5-pr12-abc1234.zip`). A comment on the
+PR links the latest build and is updated on each push; for PRs from forks
+the link is in the summary of the CI run instead. Downloading needs a
+GitHub login, and the zip is kept for 14 days. Install it in calibre with
+*Load plugin from file* as usual.
+
 ### Cutting a release
 
 Merge what you want, then on GitHub: **Releases**, *Draft a new release*,
