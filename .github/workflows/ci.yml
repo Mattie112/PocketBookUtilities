@@ -62,6 +62,9 @@ jobs:
   build:
     name: Build the plugin zip
     runs-on: ubuntu-latest
+    outputs:
+      file: ${{ steps.name.outputs.file }}
+      url: ${{ steps.upload.outputs.artifact-url }}
     steps:
       - uses: actions/checkout@v7
 
@@ -72,9 +75,115 @@ jobs:
       - name: Build
         run: python build.py
 
+      # build.py names the zip after the version. For a test build, add
+      # where it came from, so two builds of the same version can be told
+      # apart and a bug report names the exact commit. calibre does not
+      # care what the file is called. On a PR the short SHA is the PR's
+      # head commit (the one a reviewer sees), although checkout builds
+      # the merge of that commit into the base branch.
+      - name: Name the zip after the PR and commit
+        id: name
+        env:
+          ZIP_GLOB: PocketBook Utilities v*.zip
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mapfile -t built < <(find . -maxdepth 1 -name "$ZIP_GLOB")
+          if [ "${#built[@]}" -ne 1 ]; then
+            echo "expected exactly one built zip, found ${#built[@]}" >&2
+            exit 1
+          fi
+          suffix="${SHA:0:7}"
+          if [ -n "$PR" ]; then suffix="pr$PR-$suffix"; fi
+          file="$(basename "${built[0]}" .zip)-$suffix.zip"
+          mv -- "${built[0]}" "$file"
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+
+      # archive: false uploads the plugin zip itself, so what a reviewer
+      # downloads installs as-is instead of being a zip inside a zip. The
+      # artifact then takes the file's name.
       - name: Upload the zip
+        id: upload
         uses: actions/upload-artifact@v7
         with:
-          name: pocketbook-utilities-zip
-          path: PocketBook Utilities v*.zip
+          path: ${{ steps.name.outputs.file }}
+          archive: false
+          retention-days: 14
           if-no-files-found: error
+
+      # Always written, so fork PRs (which get no PR comment, see below)
+      # still have the link on the run page.
+      - name: Link the zip from the run summary
+        env:
+          FILE: ${{ steps.name.outputs.file }}
+          URL: ${{ steps.upload.outputs.artifact-url }}
+        run: |
+          {
+            echo "### Plugin zip"
+            echo
+            echo "[$FILE]($URL)"
+            echo
+            echo "Downloading needs a GitHub login. Kept for 14 days."
+            echo "In calibre: Preferences, Plugins, *Load plugin from file*."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  pr-comment:
+    # One comment per PR, edited on every push, pointing at the latest
+    # build's zip.
+    #
+    # Skipped for PRs from forks: their runs get a read-only token, so the
+    # comment would fail. Commenting on fork PRs safely needs a second,
+    # workflow_run-triggered workflow that takes the PR number from an
+    # artifact the untrusted run wrote and has to validate it. Not worth
+    # the extra moving parts here; fork PRs still get the link in the run
+    # summary. Dependabot runs are read-only too, so they are skipped for
+    # the same reason.
+    name: Link the zip from the PR
+    needs: build
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    # Two quick pushes must not both find no comment and both create one.
+    concurrency:
+      group: pr-zip-comment-${{ github.event.pull_request.number }}
+    steps:
+      - name: Create or update the comment
+        uses: actions/github-script@v9
+        # Values come in through the environment, never pasted into the
+        # script, so nothing in a branch or file name can run as code.
+        env:
+          FILE: ${{ needs.build.outputs.file }}
+          URL: ${{ needs.build.outputs.url }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const marker = '<!-- pr-test-zip -->';
+            const { FILE, URL, SHA, RUN_URL } = process.env;
+            const body = [
+              marker,
+              '### Test build',
+              '',
+              `[${FILE}](${URL}) built from ${SHA.slice(0, 7)} ([run](${RUN_URL})).`,
+              '',
+              'Install in calibre: Preferences, Plugins, *Load plugin from file*, then restart.',
+              'Downloading needs a GitHub login; the zip is kept for 14 days.',
+              'This comment is updated on every push.',
+            ].join('\n');
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(
+              github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find(
+              c => c.user.type === 'Bot' && c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment(
+                { owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment(
+                { owner, repo, issue_number, body });
+            }
