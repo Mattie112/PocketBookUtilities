@@ -76,6 +76,10 @@ class TestIconIsWhereTheCodeExpects(unittest.TestCase):
         self.assertNotIn('build.py', packed)
         self.assertFalse([n for n in packed if n.startswith('tests/')],
                          'tests must not ship inside the plugin')
+        self.assertFalse([n for n in packed if n.startswith('docs/')],
+                         'the wiki and screenshots must not ship in the '
+                         'plugin; they are megabytes of PNGs calibre will '
+                         'never read')
         self.assertFalse([n for n in packed if n.startswith('.')],
                          'tooling directories must not ship in the plugin')
         self.assertFalse([n for n in packed if 'github' in n],

@@ -21,7 +21,7 @@ NAME = 'PocketBook Utilities'
 #: workflows to pick the file up without knowing the number.
 OUTPUT_GLOB = os.path.join(HERE, '%s v*.zip' % NAME)
 
-EXCLUDE_DIRS = {'tests', '__pycache__'}
+EXCLUDE_DIRS = {'tests', 'docs', '__pycache__'}
 EXCLUDE_FILES = {'build.py'}
 EXCLUDE_SUFFIXES = ('.pyc', '.pyo', '.zip', '.orig', '.rej')
 

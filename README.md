@@ -9,6 +9,10 @@ calibre library, and can fix the author information PocketBook sorts by.
 Think of it as the PocketBook equivalent of
 [Kobo Utilities](https://github.com/janlarres/kobo-utilities).
 
+The [wiki](https://github.com/Mattie112/PocketBookUtilities/wiki) is the full
+documentation: every menu entry, every setting, how the sync decides what to
+change, and what to do when it does something you did not expect.
+
 Questions, bug reports and "it works on my PocketBook X" are welcome either in
 the [issue tracker](https://github.com/Mattie112/PocketBookUtilities/issues) or
 in the [MobileRead thread](https://www.mobileread.com/forums/showthread.php?t=376388).
