@@ -12,6 +12,16 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def load_build():
+    """build.py as a module, without importing the plugin package."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        'pbu_build', os.path.join(ROOT, 'build.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 class TestIconIsWhereTheCodeExpects(unittest.TestCase):
 
     def icon_path(self):
@@ -81,12 +91,7 @@ class TestVersioning(unittest.TestCase):
     """A release tag must not be able to disagree with the plugin."""
 
     def build_module(self):
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            'pbu_build_ver', os.path.join(ROOT, 'build.py'))
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
+        return load_build()
 
     def test_version_is_read_without_importing_calibre(self):
         build = self.build_module()
@@ -196,11 +201,24 @@ class TestWorkflows(unittest.TestCase):
                          'a release must not fail because PLUGIN_VERSION '
                          'was not bumped by hand first')
 
-    def test_release_publishes_the_zip_the_build_produces(self):
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            'pbu_build_name', os.path.join(ROOT, 'build.py'))
-        build = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(build)
-        self.assertIn(os.path.basename(build.OUTPUT),
-                      self.workflow('release.yml'))
+    def test_the_workflows_pick_up_the_zip_the_build_produces(self):
+        """The name carries the version, so both ends must agree on it.
+
+        A workflow naming a fixed file would silently upload nothing the
+        moment the version changed, which is every release.
+        """
+        import fnmatch
+
+        build = load_build()
+        produced = os.path.basename(build.output_path())
+        pattern = os.path.basename(build.OUTPUT_GLOB)
+        self.assertTrue(fnmatch.fnmatch(produced, pattern),
+                        '%r does not match %r' % (produced, pattern))
+        for workflow in ('release.yml', 'ci.yml'):
+            self.assertIn(pattern, self.workflow(workflow),
+                          '%s does not reference the built zip' % workflow)
+
+    def test_the_built_name_contains_the_version(self):
+        build = load_build()
+        self.assertIn('v' + build.version_string(),
+                      os.path.basename(build.output_path()))

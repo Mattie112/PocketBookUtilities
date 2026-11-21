@@ -10,7 +10,16 @@ must not import Qt or anything from ``calibre.gui2``.
 
 from calibre.customize import InterfaceActionBase
 
-PLUGIN_VERSION = (0, 0, 2)
+#: The version calibre shows, and the version the built zip is named after.
+#:
+#: Releases do not use this value. The release workflow rewrites this line
+#: from the git tag before building, so the published zip reports the tag it
+#: was cut from and nothing has to be edited before tagging. What is
+#: committed here is only the default for a build from a checkout, so it can
+#: trail the latest release without anything being wrong.
+#:
+#: To bring it up to date: python build.py --set-version 0.0.5
+PLUGIN_VERSION = (0, 0, 5)
 
 
 class PocketBookUtilities(InterfaceActionBase):

@@ -100,12 +100,12 @@ mode rather than MTP. There are no Python dependencies.
 ## Installing
 
 In calibre: Preferences, Plugins, *Load plugin from file*, pick
-`PocketBook Utilities.zip`, restart.
+`PocketBook Utilities v<version>.zip`, restart.
 
 Or from a terminal:
 
 ```bash
-calibre-customize -a "PocketBook Utilities.zip"
+calibre-customize -a "PocketBook Utilities v0.0.5.zip"
 ```
 
 Installing this way registers the plugin but won't add a toolbar button,
@@ -272,7 +272,7 @@ themselves when it is absent.
 ```bash
 python tests/run_tests.py               # 128 tests, no calibre needed
 calibre-debug -e tests/run_tests.py     # all 179, including the dialogs
-python build.py                         # build the zip
+python build.py                         # build PocketBook Utilities v<version>.zip
 python build.py --version               # the version the zip will report
 ```
 
