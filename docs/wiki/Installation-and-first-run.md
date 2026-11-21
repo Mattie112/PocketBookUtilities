@@ -45,7 +45,7 @@ The first time a reader is connected, a setup dialog appears. It shows the
 device it found, the database path and the schema version, then a preview of
 the columns it wants to create.
 
-<!-- screenshot: wizard.png -- the first-run setup dialog -->
+![The first-run setup dialog](https://raw.githubusercontent.com/Mattie112/PocketBookUtilities/main/docs/screenshots/wizard.png)
 
 Three checkboxes:
 

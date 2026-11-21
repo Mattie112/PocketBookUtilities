@@ -9,8 +9,6 @@ keep count and the debug flag are plugin-wide.
 The dialog opens with no reader attached and shows the last device it saw, so
 you can change settings without plugging anything in.
 
-<!-- screenshot: settings-sync.png -- the settings dialog on the Sync tab -->
-
 ## Device
 
 Read-only information first: the device name, which calibre driver is driving
@@ -23,6 +21,8 @@ it, and disables features the firmware has no table for.
 |---|---|---|
 | Backups to keep | 10 | How many automatic backups are kept per device. The very first backup ever taken is always kept on top of this. Plugin-wide. |
 | Eject the device automatically after writing to it | off | PocketBook can rewrite its database from memory when the USB connection drops, undoing what was just written. Ejecting first avoids that. |
+
+![The Device tab](https://raw.githubusercontent.com/Mattie112/PocketBookUtilities/main/docs/screenshots/settings-device.png)
 
 Four buttons — **Back up now**, **Restore a backup…**, **Check the
 database…** and **Verify the last write…** — do the same as their menu
@@ -39,6 +39,8 @@ Fields the connected device does not support are greyed out and say so.
 See [Columns](Columns).
 
 ## Sync
+
+![The settings dialog on the Sync tab](https://raw.githubusercontent.com/Mattie112/PocketBookUtilities/main/docs/screenshots/settings-sync.png)
 
 **What to keep in step** — one checkbox per field; all seven are on by
 default. Fields that only ever read from the device say so in their tooltip.

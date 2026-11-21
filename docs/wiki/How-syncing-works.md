@@ -60,7 +60,7 @@ and treats every difference as a change. Nothing is deleted from either side.
 
 ## 3. The review dialog
 
-<!-- screenshot: review.png -- the review dialog with changes in both directions -->
+![The review dialog, listing what a sync proposes in each direction](https://raw.githubusercontent.com/Mattie112/PocketBookUtilities/main/docs/screenshots/review.png)
 
 One row per proposed change: the book, the field, the direction, the old
 value and the new value, why the plugin wants to make it, and how confidently

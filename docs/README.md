@@ -5,6 +5,7 @@ Not shipped in the plugin zip. `build.py` skips this directory.
 * `wiki/` — the pages published to the
   [GitHub wiki](https://github.com/Mattie112/PocketBookUtilities/wiki).
 * `screenshots/` — images used by the wiki and the main README.
+* `make_screenshots.py` — regenerates most of those images.
 
 ## Publishing the wiki
 
@@ -24,31 +25,40 @@ between pages use. `_Sidebar.md` is the navigation shown beside every page.
 Keeping the source here means the wiki is reviewable in a pull request and
 cannot drift away unnoticed. Edit it here, then copy it over.
 
+Wiki pages reference images by their full raw URL, because a wiki page cannot
+see this repository's files. The main README uses a relative path.
+
 ## Screenshots
 
-Drop PNGs into `screenshots/` with these names. Each is referenced from an
-HTML comment in the page that wants it, so adding the file is all that is
-needed to wire it up.
+### Generated
 
-| File | Shot |
+    & "C:\Program Files\Calibre2\calibre-debug.exe" -e docs\make_screenshots.py
+
+Builds the plugin's own dialogs with invented books and grabs each one. The
+widgets are laid out off-screen, so no window appears and no reader has to be
+plugged in. Re-run it when a dialog changes.
+
+| File | Shows |
 |---|---|
-| `menu.png` | The toolbar button's drop-down menu, open, with the reader connected so nothing is greyed out. Include the submenus if you can get one expanded. |
-| `review.png` | The review dialog after **Sync now**, showing a few changes in both directions. |
-| `wizard.png` | The first-run setup dialog, with the column preview visible. |
-| `columns.png` | The library view with the `PB *` columns showing — read ticks, a progress percentage, a collection or two. Four or five rows is plenty. |
-| `settings-sync.png` | The settings dialog on the **Sync** tab. |
+| `review.png` | The review dialog, with changes in both directions, an already-applied pair and an unticked weak match |
+| `wizard.png` | The first-run setup dialog with its column preview |
+| `settings-device.png` | The settings dialog, Device tab |
+| `settings-sync.png` | The settings dialog, Sync tab |
 
-Crop to the window, not the whole desktop. A light theme reads better on
-GitHub, which renders both light and dark, but either works.
+The books in them are made up. Screenshots of a real library put its contents
+in a public repository, and the pages only need something plausible on
+screen.
 
-Anything with book titles in it is a screenshot of your library, so use books
-you are happy to have in a public repository.
+### Still to be taken by hand
 
-In wiki pages, reference them with the full raw URL, because a wiki page
-cannot see this repository's files:
+These are calibre showing its own windows, which the script cannot build.
+Drop the file into `screenshots/` and replace the matching
+`<!-- screenshot: ... -->` comment in the page with an image tag.
 
-    ![The menu](https://raw.githubusercontent.com/Mattie112/PocketBookUtilities/main/docs/screenshots/menu.png)
+| File | Shot | Wanted by |
+|---|---|---|
+| `menu.png` | The toolbar button's drop-down, open, with the reader connected so nothing is greyed out. One submenu expanded if you can manage it. | `Home`, `Menu-reference` |
+| `columns.png` | Four or five library rows with the `PB *` columns showing — read ticks, a progress percentage, a collection or two. | `Columns` |
 
-In the main README a relative path works:
-
-    ![The menu](docs/screenshots/menu.png)
+Crop to the window rather than the whole desktop. These two will show real
+book titles, so use books you are happy to have in a public repository.

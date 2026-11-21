@@ -5,7 +5,7 @@ favourites and collections in step between a PocketBook e-reader and a calibre
 library, and can repair the author information the reader sorts by.
 
 <!-- screenshot: menu.png -- the plugin's drop-down menu, device connected -->
-<!-- screenshot: review.png -- the review dialog with a few changes listed -->
+![The review dialog, listing what a sync proposes in each direction](https://raw.githubusercontent.com/Mattie112/PocketBookUtilities/main/docs/screenshots/review.png)
 
 ## Start here
 
