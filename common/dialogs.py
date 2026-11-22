@@ -247,6 +247,13 @@ class ChangeReviewDialog(CheckTableDialog):
         heading.setWordWrap(True)
         layout.addWidget(heading)
 
+        if plan.errors:
+            from ..runner import describe_collection_errors
+            failures = QLabel('Collections template failed for %d book(s).'
+                              % len(plan.errors))
+            failures.setToolTip(describe_collection_errors(plan.errors))
+            layout.addWidget(failures)
+
         sort_note = QLabel('Sorted by book, then by what changes. '
                            'Click a column heading to sort by it.')
         sort_note.setStyleSheet('color: palette(mid);')
@@ -358,7 +365,8 @@ class ChangeReviewDialog(CheckTableDialog):
         self._tick(self.changes, lambda change: False)
 
     def select_trusted(self):
-        self._tick(self.changes, lambda change: change.link.is_trusted)
+        self._tick(self.changes, lambda change: (
+            change.link.is_trusted and not change.requires_review))
 
     def apply_selection(self):
         """Copy the tick boxes back onto the plan."""

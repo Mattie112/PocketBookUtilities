@@ -6,6 +6,10 @@ to load. Nothing here calls exec(), so no windows appear.
 """
 
 import unittest
+from contextlib import closing
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from base import needs_calibre_gui
 
@@ -225,8 +229,6 @@ class TestModulesImport(unittest.TestCase):
         self.assertTrue(hasattr(module, class_name))
 
 
-if __name__ == '__main__':
-    unittest.main()
 
 
 class TestMetadataReviewDialog(unittest.TestCase):
@@ -398,3 +400,84 @@ class TestAppliedRowsAreShown(unittest.TestCase):
         titles = [dialog.table.item(r, 1).text()
                   for r in range(dialog.table.rowCount())]
         self.assertEqual(len(set(titles)), 1)
+
+
+class TestCoreActionSafety(unittest.TestCase):
+
+    def test_failed_eject_does_not_claim_safe_to_unplug(self):
+        from calibre.gui2.device import DeviceManager
+        from calibre_plugins.pocketbook_utilities.action import (
+            PocketBookUtilitiesAction)
+
+        ejected = []
+        manager = SimpleNamespace(
+            is_device_connected=True, is_device_present=True,
+            job_manager=SimpleNamespace(has_device_jobs=lambda: True),
+            connected_device=SimpleNamespace(eject=lambda: ejected.append(True)))
+        manager.umount_device = lambda: DeviceManager.umount_device(manager)
+        action = SimpleNamespace(gui=SimpleNamespace(device_manager=manager))
+        self.assertFalse(PocketBookUtilitiesAction._eject(action))
+        self.assertEqual(ejected, [])
+
+    def test_eject_reports_success_once_calibre_marks_device_gone(self):
+        from calibre_plugins.pocketbook_utilities.action import (
+            PocketBookUtilitiesAction)
+
+        manager = SimpleNamespace(is_device_present=True)
+        manager.umount_device = lambda: setattr(manager, 'is_device_present', False)
+        action = SimpleNamespace(gui=SimpleNamespace(device_manager=manager))
+        self.assertTrue(PocketBookUtilitiesAction._eject(action))
+
+    def test_idle_action_records_agreement_but_dry_run_does_not(self):
+        from calibre_plugins.pocketbook_utilities import action
+        from calibre_plugins.pocketbook_utilities.sync.engine import Mode
+
+        fake = SimpleNamespace(
+            gui=object(), require_device=lambda: object(),
+            _require_live_columns=lambda _settings: None,
+            settings=dict, _sync_running=False)
+        with patch.object(action.runner, 'SyncContext') as factory, \
+                patch.object(action, 'info_dialog'):
+            context = factory.return_value
+            context.read.return_value = SyncPlan()
+            context.review_after_restore = False
+            action.PocketBookUtilitiesAction._run_sync(fake, Mode.MERGE, None, True)
+            context.remember.assert_not_called()
+            action.PocketBookUtilitiesAction._run_sync(fake, Mode.MERGE, None, False)
+            context.remember.assert_called_once_with()
+
+    def test_invalid_template_does_not_propose_a_collection_replacement(self):
+        from calibre.db.legacy import LibraryDatabase
+        from calibre.ebooks.metadata.book.base import Metadata
+        from calibre_plugins.pocketbook_utilities import runner
+        from calibre_plugins.pocketbook_utilities.device.schema import Capabilities
+        from calibre_plugins.pocketbook_utilities.sync.engine import (
+            Mode, SyncInputs, build_plan)
+
+        with TemporaryDirectory() as folder, closing(LibraryDatabase(folder)) as db:
+            book_id = db.new_api.create_book_entry(Metadata('Book', ['Author']))
+            settings = {'collections_source': 'template',
+                        'collections_template': '{title'}
+            gui = SimpleNamespace(current_db=db)
+            errors = {}
+            result = runner.calibre_collections(gui, settings, [book_id], errors)
+            self.assertEqual(result, {})
+            self.assertIn(book_id, errors)
+            settings['collections_template'] = '{title}'
+            self.assertEqual(runner.calibre_collections(gui, settings, [book_id]),
+                             {book_id: frozenset({'Book'})})
+
+        link = BookLink(book_id, 1, 'Book.epub', '/mnt/ext1/Book.epub',
+                        MatchConfidence.EXACT_PATH)
+        inputs = SyncInputs(
+            [link], {}, {}, device_collections={1: frozenset({'Keep'})},
+            calibre_collections=result, collection_errors=errors)
+        caps = Capabilities(tables=frozenset({'bookshelfs', 'bookshelfs_books'}))
+        plan = build_plan(inputs, caps, {'collections'},
+                          mode=Mode.FORCE_SEND, allow_clear=True)
+        self.assertEqual(plan.device_changes, [])
+        self.assertEqual(len(plan.errors), 1)
+
+
+if __name__ == '__main__':
+    unittest.main()

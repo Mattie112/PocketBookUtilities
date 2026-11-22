@@ -43,6 +43,8 @@ class PocketBookUtilitiesAction(InterfaceAction):
 
     def genesis(self):
         self.device = None
+        self._checked_reader = None
+        self._sync_running = False
         self.menu = QMenu(self.gui)
         self.menu.aboutToShow.connect(self.rebuild_menus)
         icon = self._load_icon()
@@ -132,6 +134,7 @@ class PocketBookUtilitiesAction(InterfaceAction):
     def _device_changed(self, connected):
         if not connected:
             self.device = None
+            self._checked_reader = None
         self.rebuild_menus()
 
     def _device_metadata(self):
@@ -139,7 +142,10 @@ class PocketBookUtilitiesAction(InterfaceAction):
         self.rebuild_menus()
         if self.device is None:
             return
-        self._check_previous_write()
+        reader = (self.device.serial, self.device.db_path)
+        if self._checked_reader != reader:
+            self._checked_reader = reader
+            self._check_previous_write()
         settings = self.settings()
         if not settings.get('configured'):
             self.run_setup_wizard()
@@ -151,7 +157,7 @@ class PocketBookUtilitiesAction(InterfaceAction):
 
     def _sync_on_connect(self):
         """Run the sync the user asked for when the reader is plugged in."""
-        if self.device is None:
+        if self.device is None or self._sync_running:
             return
         settings = self.settings()
         mode = config_mod.on_connect_mode(settings)
@@ -180,7 +186,7 @@ class PocketBookUtilitiesAction(InterfaceAction):
             return
         if outcome is None or outcome[0]:
             return
-        error_dialog(self.gui, 'Changes were undone by the reader',
+        error_dialog(self.gui, 'Reader differs from the last write',
                      outcome[1], show=True)
         # Said once. Without this the same dialog comes back on every
         # connection and every library switch until the next write; the
@@ -428,12 +434,28 @@ class PocketBookUtilitiesAction(InterfaceAction):
                 if key in only_fields]
         automatic = on_connect is not None
 
+        if self._sync_running:
+            return None
         context = runner.SyncContext(self.gui, device, settings)
+        self._sync_running = True
         try:
             plan = context.read(restrict_to=restrict_to, mode=mode)
             self.device = context.device
+            if automatic and context.review_after_restore:
+                self._status('Backup restored. Run a manual sync to review the reader.')
+                return None
 
+            full_manual = (not automatic and not dry_run
+                           and restrict_to is None and only_fields is None)
             if plan.is_empty:
+                if not dry_run:
+                    context.remember()
+                if plan.errors:
+                    return error_dialog(
+                        self.gui, 'Collections template failed',
+                        runner.describe_collection_errors(plan.errors), show=True)
+                if full_manual:
+                    context.finish_restore_review()
                 if automatic:
                     debug('nothing to do on connect')
                     return None
@@ -453,7 +475,10 @@ class PocketBookUtilitiesAction(InterfaceAction):
             # everything unless the user turned review off.
             show_review = needs_review and (
                 dry_run or automatic
-                or settings.get('always_review', True))
+                or settings.get('always_review', True)
+                or plan.errors
+                or any(change.requires_review or not change.selected
+                       or not change.link.is_trusted for change in needs_review))
 
             if show_review:
                 dialog = ChangeReviewDialog(
@@ -488,6 +513,9 @@ class PocketBookUtilitiesAction(InterfaceAction):
                 return None
 
             calibre_written, device_written = context.apply()
+            if full_manual and not plan.errors and all(
+                    change.selected for change in plan.all_changes):
+                context.finish_restore_review()
             ejected = False
             if device_written and settings.get('eject_after_write'):
                 ejected = self._eject()
@@ -501,6 +529,7 @@ class PocketBookUtilitiesAction(InterfaceAction):
                 info_dialog(self.gui, 'Sync finished', message, show=True)
         finally:
             context.close()
+            self._sync_running = False
         return None
 
     def _status(self, message):
@@ -510,12 +539,15 @@ class PocketBookUtilitiesAction(InterfaceAction):
             debug('could not show a status message: %s' % err)
 
     def _eject(self):
+        manager = self.gui.device_manager
         try:
-            self.gui.device_manager.umount_device()
+            if not manager.is_device_present:
+                return False
+            manager.umount_device()
+            return not manager.is_device_present
         except Exception as err:
             debug('could not eject the device: %s' % err)
             return False
-        return True
 
     def push_metadata(self):
         self.guarded('Could not update device metadata',
@@ -529,26 +561,8 @@ class PocketBookUtilitiesAction(InterfaceAction):
         context = runner.SyncContext(self.gui, device, settings)
         try:
             context.read()
-            api = self.gui.current_db.new_api
             ids = [link.calibre_id for link in context.inputs.links]
-            meta = {}
-            titles = api.all_field_for('title', ids)
-            # calibre's fetchable name for the title sort is 'sort';
-            # 'title_sort' appears in field_metadata but raises here.
-            sorts = api.all_field_for('sort', ids)
-            authors = api.all_field_for('authors', ids)
-            author_sorts = api.all_field_for('author_sort', ids)
-            series = api.all_field_for('series', ids)
-            indices = api.all_field_for('series_index', ids)
-            for book_id in ids:
-                meta[book_id] = {
-                    'title': titles.get(book_id),
-                    'title_sort': sorts.get(book_id),
-                    'authors': ' & '.join(authors.get(book_id) or ()),
-                    'author_sort': author_sorts.get(book_id),
-                    'series': series.get(book_id),
-                    'series_index': indices.get(book_id),
-                }
+            meta = runner.read_calibre_metadata(self.gui, ids)
 
             changes = metadata_push.build_metadata_changes(
                 context.inputs.links, context.index.by_book_id, meta,
@@ -576,10 +590,20 @@ class PocketBookUtilitiesAction(InterfaceAction):
                 return info_dialog(self.gui, 'Nothing selected',
                                    'No changes were ticked.', show=True)
 
+            context.require_current_device()
+            chosen_ids = {change.calibre_id for change in chosen}
+            context.validate_calibre_matches(chosen_ids)
+            live_meta = runner.read_calibre_metadata(self.gui, chosen_ids)
+            if any(live_meta[book_id] != meta[book_id] for book_id in chosen_ids):
+                raise PluginError('Calibre metadata changed during review.',
+                                  'Run the operation again to review current values.')
             runner.make_backup(
-                device,
+                context.device,
                 keep=int(config_mod.plugin_prefs().get('backup_keep', 10)))
+            context.require_current_device()
             with context.copy.write() as conn:
+                context.validate_device(conn, {change.device_book_id for change in chosen})
+                metadata_push.validate_targets(conn, chosen)
                 written = metadata_push.apply_metadata(conn, chosen)
             info_dialog(self.gui, 'Device metadata updated',
                         'Updated %d book(s).\n\nEject the reader from '
@@ -721,8 +745,13 @@ class PocketBookUtilitiesAction(InterfaceAction):
                 'This cannot be undone.' % selected['name']):
             return None
 
-        runner.make_backup(device, keep=99)     # safety net first
-        runner.restore_backup(device, selected['path'])
+        current = get_device(self.gui)
+        if (current is None or current.serial != device.serial
+                or current.db_path != device.db_path):
+            raise PluginError('The reader changed while choosing a backup.',
+                              'Open Restore a backup again for the current reader.')
+        runner.make_backup(current, keep=99)     # safety net first
+        runner.restore_backup(current, selected['path'])
         info_dialog(self.gui, 'Backup restored',
                     'The device database was restored from %s.\n\n'
                     'Eject the reader before unplugging it.'
@@ -740,10 +769,10 @@ class PocketBookUtilitiesAction(InterfaceAction):
                 return
             ok, message = outcome
             if ok:
-                info_dialog(self.gui, 'Changes are still there', message,
+                info_dialog(self.gui, 'Last write verification', message,
                             show=True)
             else:
-                error_dialog(self.gui, 'Changes were undone', message,
+                error_dialog(self.gui, 'Reader differs from the last write', message,
                              show=True)
         self.guarded('Could not verify', run)
 

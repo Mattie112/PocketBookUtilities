@@ -35,7 +35,8 @@ def _fold(names):
     return {n.casefold() for n in names}
 
 
-def build(plan, profile_id, field_for_key, remove_missing=True):
+def build(plan, profile_id, field_for_key, remove_missing=True,
+          protect_positions=False):
     """Expectations for the selected device-bound changes in *plan*.
 
     *field_for_key* maps a field key to its :class:`FieldSpec`.
@@ -68,9 +69,10 @@ def build(plan, profile_id, field_for_key, remove_missing=True):
             })
             continue
         column = spec.device_column
-        if not column or column in DEVICE_OWNED:
+        position = column == 'position' and protect_positions
+        if not column or (column in DEVICE_OWNED and not position):
             continue
-        out.append({
+        item = {
             'kind': SETTING,
             'bookid': change.link.device_book_id,
             'title': change.link.title,
@@ -78,8 +80,38 @@ def build(plan, profile_id, field_for_key, remove_missing=True):
             'column': column,
             'value': change.new,
             'field': change.field,
-        })
+        }
+        if position:
+            item['previous'] = change.old
+        out.append(item)
     return out
+
+
+def key(item):
+    return item.get('profileid'), item['bookid'], item.get('field', COLLECTIONS)
+
+
+def merge_pending(old, new, resolved=()):
+    entries = {key(item): item for item in old if key(item) not in resolved}
+    for item in new:
+        identifier = key(item)
+        existing = entries.get(identifier)
+        if existing and 'previous' in existing and 'previous' in item:
+            priors = existing.get('older_positions', []) + [existing['previous']]
+            item = dict(item, older_positions=list(dict.fromkeys(priors)))
+        if existing and item['kind'] == COLLECTIONS:
+            wanted = {name.casefold(): name for name in existing['names']}
+            removed = {name.casefold(): name for name in existing['removed']}
+            for name in item['names']:
+                wanted[name.casefold()] = name
+                removed.pop(name.casefold(), None)
+            for name in item['removed']:
+                removed[name.casefold()] = name
+                wanted.pop(name.casefold(), None)
+            item = dict(item, names=sorted(wanted.values()),
+                        removed=sorted(removed.values()))
+        entries[identifier] = item
+    return list(entries.values())
 
 
 def _has_column(conn, table, column):
@@ -102,7 +134,7 @@ def _live_collection_names(conn, bookid):
     return sorted(r[0] for r in rows if r[0])
 
 
-def check(conn, expectations):
+def check(conn, expectations, for_reconnect=False):
     """``(failures, unchecked)`` for *expectations*.
 
     *failures* no longer hold. *unchecked* could not be looked at, which is
@@ -139,8 +171,17 @@ def check(conn, expectations):
                     'SELECT "%s" FROM books_settings WHERE %s'
                     % (item['column'], where), params).fetchone()
                 found = row[0] if row is not None else None
-                if not _same(found, item.get('value')):
-                    failures.append((item, found))
+                if _same(found, item.get('value')):
+                    continue
+                if 'previous' in item:
+                    # Ordinary reading often moves the position. A return
+                    # to a pre-write value can also mean a rollback.
+                    priors = item.get('older_positions', []) + [item['previous']]
+                    if not any(_same(found, value) for value in priors):
+                        if not for_reconnect:
+                            unchecked.append(item)
+                        continue
+                failures.append((item, found))
             else:
                 unchecked.append(item)
         except Exception as err:
@@ -189,9 +230,8 @@ def describe(failures, when):
         lines.append('   ... and %d more' % (len(failures) - 12))
     lines += [
         '',
-        'PocketBook rewrites its library database from memory when the USB '
-        'connection drops, which undoes changes made while it was plugged '
-        'in. Eject the reader from calibre before unplugging it, then sync '
-        'again.',
+        'This can happen after a reader edit or if the reader rolls back '
+        'the database on disconnect. Review these fields before syncing '
+        'them again. Eject the reader from calibre before unplugging it.',
     ]
     return '\n'.join(lines)

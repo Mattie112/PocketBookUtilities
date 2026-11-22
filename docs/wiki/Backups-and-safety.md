@@ -17,7 +17,10 @@ sets how many are kept per device (10 by default); the very first backup ever
 taken for a device is always kept on top of that.
 
 **Back up the device database now** takes one on demand. **Restore a
-backup…** puts one back.
+backup…** checks that the snapshot is a readable, compatible PocketBook
+database before replacing the reader's database. After a restore, run a
+manual sync to review the restored values before automatic sync resumes
+for that library.
 
 Backups are made with SQLite's backup API rather than by copying the file.
 The reader's database is in write-ahead-log mode, so a plain file copy reads
@@ -25,8 +28,10 @@ stale data and silently loses whatever is in the `-wal`.
 
 ## How writes are made
 
-* Read from a snapshot taken locally, so nothing is analysed over USB.
-* Write in one short transaction, with every value as a bound parameter.
+* Plan from a local snapshot. Before applying, recheck the selected books
+  and fields against the current reader and calibre library. If they changed
+  during review, run the operation again to see a fresh plan.
+* Write in one transaction, with every value as a bound parameter.
   No SQL is built by string concatenation, so an apostrophe in a title or a
   collection name is just an apostrophe.
 * **No `DELETE` statement exists anywhere in the plugin**, and a test fails
@@ -42,14 +47,16 @@ drops, undoing changes that were just written.
 Two things help:
 
 * **Eject the device automatically after writing to it** (Device tab, off by
-  default) ejects before that can happen.
-* **Verify the last write…** re-reads the exact rows and values the last
-  write touched and reports any the device has since changed back, with a
-  one-click re-apply.
+  default) asks calibre to eject. If calibre still shows the device as
+  present, the plugin asks you to eject manually. Wait for your reader or
+  operating system to confirm it is safe to unplug.
+* **Verify the last write…** compares the written values with the reader's
+  current values. A discrepancy can be a reader edit or a rollback. Fields
+  with unresolved discrepancies start unticked and require review even in
+  automatic modes.
 
-The receipt records the specific values written, not a hash of whole rows, so
-reading a book after a sync — which legitimately moves the position — is not
-reported as the device undoing something.
+For a reading position, a return to a value from before the write requires
+review. A new position reached through ordinary reading can sync as usual.
 
 ## Checking the database
 

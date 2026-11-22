@@ -8,7 +8,7 @@ from base import REAL_DUMP, FixtureTestCase, real_dump_available
 from calibre_plugins.pocketbook_utilities.device import db as dbmod
 from calibre_plugins.pocketbook_utilities.device import schema
 from calibre_plugins.pocketbook_utilities.sync import identity
-from calibre_plugins.pocketbook_utilities.sync.model import MatchConfidence
+from calibre_plugins.pocketbook_utilities.sync.model import DeviceFileRow, MatchConfidence
 
 import make_fixture
 
@@ -138,6 +138,45 @@ class TestMatching(IdentityTestCase):
         device_ids = [l.device_book_id for l in links]
         self.assertEqual(len(device_ids), len(set(device_ids)))
         self.assertIn(9999, unmatched)
+
+
+class TestVolumeMatching(unittest.TestCase):
+
+    def setUp(self):
+        path = 'Books/a.epub'
+        self.main = DeviceFileRow(1, 1, '/mnt/ext1/Books', 'a.epub', 100, relpath=path)
+        self.card = DeviceFileRow(2, 2, '/mnt/ext2/Books', 'a.epub', 100, relpath=path)
+        self.roots = {1: {'location': 'main'}, 2: {'location': 'card_a'}}
+        self.book = {'id': 10, 'lpath': path, 'size': 100, 'location': 'main'}
+
+    def match(self, rows, books):
+        return identity.build_links(identity.DeviceIndex(rows, self.roots), books)
+
+    def test_same_path_on_two_volumes_uses_the_correct_volume(self):
+        links, unmatched, _only = self.match([self.card, self.main], [self.book])
+        self.assertEqual(unmatched, [])
+        self.assertEqual((links[0].device_book_id, links[0].confidence),
+                         (1, MatchConfidence.EXACT_PATH))
+
+    def test_card_copy_cannot_match_when_only_main_copy_is_reported(self):
+        links, unmatched, _only = self.match([self.card], [self.book])
+        self.assertEqual(links, [])
+        self.assertEqual(unmatched, [10])
+
+    def test_two_equal_copies_of_one_calibre_book_remain_ambiguous(self):
+        second = dict(self.book, location='card_a')
+        links, unmatched, _only = self.match([self.main, self.card],
+                                              [self.book, second])
+        self.assertEqual(links, [])
+        self.assertEqual(unmatched, [10])
+
+    def test_a_known_size_mismatch_does_not_get_filename_confidence(self):
+        for path in ('Books/a.epub', 'Moved/a.epub'):
+            with self.subTest(path=path):
+                book = dict(self.book, lpath=path, size=101)
+                links, unmatched, _only = self.match([self.main], [book])
+                self.assertEqual(links, [])
+                self.assertEqual(unmatched, [10])
 
 
 class TestReadingState(IdentityTestCase):
@@ -280,17 +319,13 @@ class TestOlderBooksImpl(IdentityTestCase):
 class TestSingleBookFolder(unittest.TestCase):
     """Every book in one folder must not make that folder the root."""
 
-    def test_a_known_root_wins_a_tie(self):
-        self.assertTrue(identity._better_root('/mnt/ext1', '/mnt/ext1/Books'))
-        self.assertFalse(identity._better_root('/mnt/ext1/Books',
-                                               '/mnt/ext1'))
+    def test_the_known_storage_root_is_resolved_not_the_folder(self):
+        self.assertEqual(self.resolve_root('/mnt/ext1/Books'), '/mnt/ext1')
 
-    def test_otherwise_the_shorter_root_wins(self):
-        self.assertTrue(identity._better_root('/mnt/int0', '/mnt/int0/Books'))
-        self.assertFalse(identity._better_root('/mnt/int0/Books',
-                                               '/mnt/int0'))
+    def test_an_unknown_root_uses_the_shortest_matching_root(self):
+        self.assertEqual(self.resolve_root('/mnt/int0/Books'), '/mnt/int0')
 
-    def test_the_storage_root_is_resolved_not_the_folder(self):
+    def resolve_root(self, device_folder):
         import shutil
         import tempfile
         prefix = tempfile.mkdtemp(prefix='pbutil-root-')
@@ -301,9 +336,8 @@ class TestSingleBookFolder(unittest.TestCase):
         conn.row_factory = sqlite3.Row
         conn.execute('CREATE TABLE folders(id INTEGER PRIMARY KEY, '
                      'storageid INTEGER, name TEXT)')
-        conn.execute("INSERT INTO folders VALUES (1, 1, '/mnt/ext1/Books')")
-        roots = identity.resolve_storage_roots(conn, {'main': prefix})
-        self.assertEqual(roots[1]['root'], '/mnt/ext1')
+        conn.execute('INSERT INTO folders VALUES (1, 1, ?)', (device_folder,))
+        return identity.resolve_storage_roots(conn, {'main': prefix})[1]['root']
 
 
 class TestShelvesWithoutSoftDelete(unittest.TestCase):

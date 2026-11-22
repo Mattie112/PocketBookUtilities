@@ -48,6 +48,7 @@ class SyncInputs:
     prior: Dict[Any, Any] = dc_field(default_factory=dict)
     unmatched_calibre: List[int] = dc_field(default_factory=list)
     device_only: List[Any] = dc_field(default_factory=list)
+    collection_errors: Dict[int, str] = dc_field(default_factory=dict)
 
     def device_state(self, link):
         found = self.device_states.get(link.device_book_id)
@@ -166,6 +167,10 @@ def build_plan(inputs, caps, enabled_fields=None, mode=Mode.MERGE,
         cal_ts = _canon_modified(inputs.calibre_modified.get(link.calibre_id))
 
         for spec in specs:
+            if spec.key == 'collections' and link.calibre_id in inputs.collection_errors:
+                plan.errors.append((link.title or str(link.calibre_id),
+                                    inputs.collection_errors[link.calibre_id]))
+                continue
             if spec.key == 'collections':
                 raw_device = inputs.device_collections.get(link.device_book_id)
                 raw_calibre = inputs.calibre_collections.get(link.calibre_id)
@@ -363,6 +368,8 @@ def record_entries(plan, inputs, caps, enabled_fields=None):
         state = inputs.device_state(link)
         values = inputs.calibre_values.get(link.calibre_id, {})
         for spec in specs:
+            if spec.key == 'collections' and link.calibre_id in inputs.collection_errors:
+                continue
             if spec.key == 'collections':
                 raw_device = inputs.device_collections.get(link.device_book_id)
                 raw_calibre = inputs.calibre_collections.get(link.calibre_id)
@@ -373,12 +380,15 @@ def record_entries(plan, inputs, caps, enabled_fields=None):
             cal_c = spec.canonical(raw_calibre)
 
             change = applied.get((link.calibre_id, spec.key))
-            if change is not None and change.direction is Side.CALIBRE:
-                entries.append((link.calibre_id, spec.key, dev_c, dev_c))
-            elif change is not None:
+            if change is not None:
                 entries.append((link.calibre_id, spec.key, dev_c, cal_c))
             elif dev_c == cal_c:
-                entries.append((link.calibre_id, spec.key, dev_c, dev_c))
+                prior_dev, prior_cal = inputs.prior.get(
+                    (link.calibre_id, spec.key), (UNKNOWN, UNKNOWN))
+                if (prior_dev is UNKNOWN or prior_cal is UNKNOWN
+                        or spec.canonical(prior_dev) != dev_c
+                        or spec.canonical(prior_cal) != cal_c):
+                    entries.append((link.calibre_id, spec.key, dev_c, dev_c))
             # Otherwise: not applied and still different. Do not claim
             # agreement, or the next run would treat it as "nothing moved".
     return entries

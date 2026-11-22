@@ -30,7 +30,7 @@ stays correct without us touching the index.
 from dataclasses import dataclass
 from typing import Optional
 
-from ..common.compat import debug
+from ..common.compat import PluginError, debug
 
 #: Fields the user can push, in the order shown in the preview.
 PUSH_FIELDS = ('title', 'author', 'firstauthor', 'series')
@@ -206,6 +206,20 @@ def update_statement(columns):
                          % sorted(unknown))
     assignments = ', '.join('%s = ?' % name for name in names)
     return 'UPDATE books_impl SET %s WHERE id = ?' % assignments, names
+
+
+def validate_targets(conn, changes):
+    """Check the approved old values before updating the live database."""
+    for change in changes:
+        _sql, columns = update_statement(change.columns)
+        row = conn.execute(
+            'SELECT %s FROM books_impl WHERE id = ?' % ', '.join(columns),
+            (change.device_book_id,)).fetchone()
+        if row is None or tuple(row) != tuple(change.old[name] for name in columns):
+            raise PluginError(
+                'Reader metadata changed during review.',
+                '%s. Run the operation again to review current values.'
+                % change.display_title)
 
 
 def apply_metadata(conn, changes):

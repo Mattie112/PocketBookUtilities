@@ -38,6 +38,7 @@ class PocketBookDevice:
     profile_id: int = 1
     cr3hist_path: Optional[str] = None
     caps: Capabilities = Capabilities()
+    storage_prefixes: Optional[dict] = None
 
     @property
     def has_card(self):
@@ -240,17 +241,20 @@ def get_device(gui, with_caps=True):
         return None
 
     main = getattr(driver, '_main_prefix', None)
-    card = (getattr(driver, '_card_a_prefix', None)
-            or getattr(driver, '_card_b_prefix', None))
+    card_a = getattr(driver, '_card_a_prefix', None)
+    card_b = getattr(driver, '_card_b_prefix', None)
+    card = card_a or card_b
     driver_name = '%s (%s)' % (driver.__class__.__name__,
                                getattr(driver, 'gui_name', ''))
 
-    for prefix, other in ((main, card), (card, None)):
+    for prefix, other in ((main, card), (card_a, None), (card_b, None)):
         if not prefix:
             continue
         device = probe_prefix(prefix, card_prefix=other,
                               driver_name=driver_name)
         if device is not None:
+            device = replace(device, storage_prefixes={
+                'main': main, 'card_a': card_a, 'card_b': card_b})
             debug('detected PocketBook at', prefix)
             return with_capabilities(device) if with_caps else device
     debug('connected device has no system/explorer-N database')
