@@ -115,6 +115,7 @@ class ProposedChange:
     #: "Yes" or "No". These hold the human form for both sides.
     display_old: Any = None
     display_new: Any = None
+    requires_review: bool = False
 
     def __post_init__(self):
         if self.display_old is None:
@@ -135,6 +136,7 @@ class SyncPlan:
     unmatched_calibre: List[int] = field(default_factory=list)
     device_only: List[DeviceFileRow] = field(default_factory=list)
     stats: Dict[str, int] = field(default_factory=dict)
+    errors: List[Tuple[str, str]] = field(default_factory=list)
 
     @property
     def all_changes(self):

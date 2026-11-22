@@ -70,7 +70,8 @@ class TestCompletionMessage(unittest.TestCase):
 
     def test_auto_eject_says_it_already_happened(self):
         text = self.message(0, 5, ejected=True)
-        self.assertIn('has been ejected', text)
+        self.assertIn('Calibre has marked the reader as ejected', text)
+        self.assertIn('confirm it is safe to unplug', text)
         self.assertNotIn('Eject the reader from calibre', text)
 
     def test_both_sides_are_reported(self):

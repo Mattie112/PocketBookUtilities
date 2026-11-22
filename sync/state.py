@@ -14,6 +14,7 @@ bulk value while every ``favorite`` is 0.
 import json
 import os
 import sqlite3
+import uuid
 
 from ..common.compat import debug
 
@@ -136,6 +137,34 @@ class SyncStateStore:
             'UPDATE sync_state SET device_json = NULL, calibre_json = NULL, '
             'updated = 0 WHERE library = ? AND serial = ?', (library, serial))
         self.conn.commit()
+
+    def reset_after_restore(self, serial):
+        with self.conn:
+            self.conn.execute(
+                'UPDATE sync_state SET device_json = NULL, calibre_json = NULL, '
+                'updated = 0 WHERE serial = ?', (serial,))
+            self.conn.execute(
+                'UPDATE meta SET value = ? WHERE key = ?',
+                ('', 'receipt:%s' % serial))
+            self.conn.execute(
+                'INSERT INTO meta (key, value) VALUES (?, ?) '
+                'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+                ('review_restore:%s' % serial, uuid.uuid4().hex))
+
+    def review_after_restore(self, library, serial):
+        restore_key = 'review_restore:%s' % serial
+        reviewed_key = 'reviewed_restore:%s:%s' % (library, serial)
+        values = dict(self.conn.execute('SELECT key, value FROM meta WHERE key IN (?, ?)',
+                                        (restore_key, reviewed_key)))
+        return values.get(restore_key) != values.get(reviewed_key)
+
+    def finish_restore_review(self, library, serial):
+        with self.conn:
+            self.conn.execute(
+                'INSERT INTO meta (key, value) SELECT ?, value FROM meta WHERE key = ? '
+                'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+                ('reviewed_restore:%s:%s' % (library, serial),
+                 'review_restore:%s' % serial))
 
     # -- receipts -------------------------------------------------------
     def set_receipt(self, serial, payload):

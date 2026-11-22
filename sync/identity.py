@@ -11,6 +11,7 @@ Every value reaches SQLite as a ``?`` parameter. Table names are literals.
 
 import os
 import re
+from collections import defaultdict
 from dataclasses import replace
 
 from ..common.compat import debug
@@ -35,7 +36,7 @@ SELECT fi.book_id   AS book_id,
        {numinseries} AS numinseries
 FROM files fi
 JOIN folders fo ON fo.id = fi.folder_id
-LEFT JOIN books_impl bi ON bi.id = fi.book_id
+JOIN books_impl bi ON bi.id = fi.book_id
 """
 
 #: ``books_impl`` columns that not every firmware has. Selecting one that is
@@ -120,20 +121,10 @@ def _split_root(folder_name):
     return out
 
 
-def _better_root(root, current):
-    """Which of two equally well-supported roots to believe.
-
-    A folder that *is* the candidate root always counts as found, because
-    all it proves is that the storage itself exists. So when every book
-    sits in one folder, ``/mnt/ext1`` and ``/mnt/ext1/Books`` score the
-    same, and taking the longer one strips ``Books/`` off every path and
-    leaves nothing matching exactly. A root the firmware is known to use
-    wins a tie; failing that the shorter one, which claims less.
-    """
-    known = root in CANDIDATE_ROOTS
-    if known != (current in CANDIDATE_ROOTS):
-        return known
-    return len(root) < len(current)
+def _storage_rank(option):
+    """Prefer more verified folders, then known and shorter firmware roots."""
+    hits, root, _location, _prefix = option
+    return -hits, root not in CANDIDATE_ROOTS, len(root), root
 
 
 def resolve_storage_roots(conn, prefixes):
@@ -155,31 +146,43 @@ def resolve_storage_roots(conn, prefixes):
     resolved = {}
     for storage_id, folders in by_storage.items():
         candidates = set(CANDIDATE_ROOTS)
+        folders = [name.replace('\\', '/') for name in folders if name]
         for name in folders[:200]:
             for root, _rest in _split_root(name):
                 candidates.add(root)
 
-        best = None
+        options = []
         for location, prefix in prefixes.items():
             if not prefix or not os.path.isdir(prefix):
                 continue
             for root in candidates:
+                if root == '/mnt/ext1' and location != 'main':
+                    continue
+                if root in ('/mnt/ext2', '/mnt/secsd') and location == 'main':
+                    continue
                 hits = 0
                 for name in folders:
-                    normalised = name.replace('\\', '/')
-                    if not normalised.startswith(root.rstrip('/') + '/') \
-                            and normalised != root:
+                    known = next((candidate for candidate in CANDIDATE_ROOTS
+                                  if name == candidate
+                                  or name.startswith(candidate + '/')), None)
+                    if known and root != known:
                         continue
-                    rest = normalised[len(root):].strip('/')
+                    if name != root and not name.startswith(root + '/'):
+                        continue
+                    rest = name[len(root):].strip('/')
                     target = os.path.join(prefix, *rest.split('/')) if rest \
                         else prefix
                     if os.path.isdir(target):
                         hits += 1
-                if hits and (best is None or hits > best[0]
-                             or (hits == best[0]
-                                 and _better_root(root, best[1]))):
-                    best = (hits, root, location, prefix)
-        if best is not None:
+                if hits:
+                    options.append((hits, root, location, prefix))
+        if options:
+            best = min(options, key=_storage_rank)
+            tied = [option for option in options
+                    if option[:2] == best[:2]]
+            if len(tied) != 1:
+                debug('storage %s matches multiple local volumes' % storage_id)
+                continue
             resolved[storage_id] = {
                 'root': best[1], 'location': best[2], 'prefix': best[3],
                 'hits': best[0], 'folders': len(folders),
@@ -219,7 +222,8 @@ def load_device_index(conn, caps, prefixes):
     for row in conn.execute(files_sql(caps)):
         folder = (row['folder_name'] or '').replace('\\', '/')
         info = roots.get(row['storage_id'])
-        if info is not None and folder.startswith(info['root']):
+        if info is not None and (folder == info['root']
+                                 or folder.startswith(info['root'] + '/')):
             rest = folder[len(info['root']):].strip('/')
         else:
             # Unmapped storage: keep the path as-is so the book still shows
@@ -245,6 +249,28 @@ def load_device_index(conn, caps, prefixes):
         ))
     debug('loaded %d device file rows' % len(rows))
     return DeviceIndex(rows, roots)
+
+
+def book_file_identities(conn, caps, book_ids):
+    """Raw file identities for reviewed book IDs, without filesystem scans."""
+    columns = caps.cols.get('files', ())
+    optional = [f'fi.{name}' for name in
+                ('size', 'fast_hash', 'modification_time') if name in columns]
+    select = ', '.join(['fi.book_id', 'fi.id', 'fi.storageid',
+                        'fo.name', 'fi.filename'] + optional)
+    result = defaultdict(set)
+    ids = sorted(book_ids)
+    for offset in range(0, len(ids), 500):
+        batch = ids[offset:offset + 500]
+        placeholders = ','.join('?' for _ in batch)
+        rows = conn.execute(
+            f'SELECT {select} FROM files fi '
+            'JOIN folders fo ON fo.id = fi.folder_id '
+            'JOIN books_impl bi ON bi.id = fi.book_id '
+            f'WHERE fi.book_id IN ({placeholders})', batch)
+        for row in rows:
+            result[row[0]].add(tuple(row[1:]))
+    return result
 
 
 def load_reading_state(conn, caps, profile_id):
@@ -299,85 +325,75 @@ def load_shelves(conn, caps):
 # Matching
 # --------------------------------------------------------------------------
 
-def _unique(rows, used):
-    free = [r for r in rows if r.book_id not in used]
-    return free[0] if len(free) == 1 else None
+def _same_size(book, row):
+    size = book.get('size')
+    return size is None or row.size is None or size == row.size
+
+
+def _match_candidates(index, book, confidence):
+    location = book.get('location')
+
+    def on_volume(row):
+        return (location is None
+                or index.roots.get(row.storage_id, {}).get('location') == location)
+
+    lpath = normalise_path(book.get('lpath'))
+    if confidence is MatchConfidence.EXACT_PATH:
+        rows = index.by_relpath.get(lpath, ())
+        return [row for row in rows if on_volume(row) and _same_size(book, row)]
+    if confidence in (MatchConfidence.BASENAME_SIZE, MatchConfidence.BASENAME):
+        rows = index.by_basename.get(lpath.rsplit('/', 1)[-1], ())
+        return [row for row in rows if on_volume(row) and _same_size(book, row)
+                and (confidence is MatchConfidence.BASENAME
+                     or book.get('size') is not None and row.size == book['size'])]
+    key = (normalise_text(book.get('title')), author_key(book.get('authors')))
+    return [row for row in index.by_titleauthor.get(key, ()) if on_volume(row)]
 
 
 def build_links(index, calibre_books):
-    """Match calibre books to device rows.
-
-    *calibre_books* is an iterable of dicts with ``id``, ``lpath``, ``title``,
-    ``authors`` and optionally ``size``.
-
-    Returns ``(links, unmatched_calibre_ids, device_only_rows)``.
-    """
-    links = []
-    unmatched = []
-    used = set()
-
-    pending = []
-    # Pass 1: exact relative path. Done first for every book so a weaker
-    # match can never steal a row that an exact path needs.
+    """Pair books uniquely, considering every calibre copy of each book."""
+    books_by_id = defaultdict(list)
     for book in calibre_books:
-        key = normalise_path(book.get('lpath'))
-        rows = index.by_relpath.get(key, [])
-        row = _unique(rows, used)
-        if row is not None:
-            used.add(row.book_id)
-            links.append(BookLink(
-                calibre_id=book['id'], device_book_id=row.book_id,
-                lpath=book.get('lpath') or '', device_path=row.device_path,
-                confidence=MatchConfidence.EXACT_PATH,
-                title=book.get('title') or row.title or ''))
-        else:
-            pending.append(book)
+        books_by_id[book['id']].append(book)
 
-    # Pass 2: filename, confirmed by size where both sides know it.
-    still_pending = []
-    for book in pending:
-        base = os.path.basename(
-            (book.get('lpath') or '').replace('\\', '/')).casefold()
-        rows = [r for r in index.by_basename.get(base, [])
-                if r.book_id not in used]
-        size = book.get('size')
-        confidence = None
-        row = None
-        if size is not None:
-            sized = [r for r in rows if r.size == size]
-            if len(sized) == 1:
-                row, confidence = sized[0], MatchConfidence.BASENAME_SIZE
-        if row is None and len(rows) == 1:
-            row, confidence = rows[0], MatchConfidence.BASENAME
-        if row is not None:
-            used.add(row.book_id)
+    links = []
+    pending = dict(books_by_id)
+    claimed = set()
+    contested = set()
+    for confidence in reversed(MatchConfidence):
+        matches = defaultdict(dict)
+        owners = defaultdict(set)
+        for calibre_id, books in pending.items():
+            for book in books:
+                for row in _match_candidates(index, book, confidence):
+                    matches[calibre_id].setdefault(row.book_id, (book, row))
+                    owners[row.book_id].add(calibre_id)
+
+        for calibre_id, candidates in matches.items():
+            del pending[calibre_id]
+            if len(candidates) != 1:
+                contested.update(candidates)
+        for calibre_id, candidates in matches.items():
+            if len(candidates) != 1:
+                continue
+            book, row = next(iter(candidates.values()))
+            if len(owners[row.book_id]) != 1:
+                contested.add(row.book_id)
+            if row.book_id in claimed or row.book_id in contested:
+                continue
+            claimed.add(row.book_id)
             links.append(BookLink(
-                calibre_id=book['id'], device_book_id=row.book_id,
+                calibre_id=calibre_id, device_book_id=row.book_id,
                 lpath=book.get('lpath') or '', device_path=row.device_path,
                 confidence=confidence,
                 title=book.get('title') or row.title or ''))
-        else:
-            still_pending.append(book)
 
-    # Pass 3: title + author.
-    for book in still_pending:
-        key = (normalise_text(book.get('title')),
-               author_key(book.get('authors')))
-        rows = index.by_titleauthor.get(key, [])
-        row = _unique(rows, used)
-        if row is not None:
-            used.add(row.book_id)
-            links.append(BookLink(
-                calibre_id=book['id'], device_book_id=row.book_id,
-                lpath=book.get('lpath') or '', device_path=row.device_path,
-                confidence=MatchConfidence.METADATA,
-                title=book.get('title') or row.title or ''))
-        else:
-            unmatched.append(book['id'])
-
-    device_only = [r for r in index.rows if r.book_id not in used]
-    debug('matched %d/%d calibre books; %d device books not in the library'
-          % (len(links), len(links) + len(unmatched), len(device_only)))
+    linked_ids = {link.calibre_id for link in links}
+    unmatched = [calibre_id for calibre_id in books_by_id
+                 if calibre_id not in linked_ids]
+    device_only = [row for row in index.rows if row.book_id not in claimed]
+    debug('matched %d/%d calibre books; %d device file rows not in the library'
+          % (len(links), len(books_by_id), len(device_only)))
     return links, unmatched, device_only
 
 

@@ -28,12 +28,16 @@ READ_TIMEOUT = 15.0
 WRITE_TIMEOUT = 30.0
 
 
-def ro_uri(path):
-    """A ``file:`` URI that opens *path* read-only, safe for Windows paths."""
+def file_uri(path, mode):
+    """A SQLite file URI with an explicit open mode."""
     p = os.path.abspath(path).replace('\\', '/')
     if len(p) > 1 and p[1] == ':':          # C:/... -> /C:/...
         p = '/' + p
-    return 'file:' + urllib.parse.quote(p) + '?mode=ro'
+    return 'file:' + urllib.parse.quote(p) + '?mode=' + mode
+
+
+def ro_uri(path):
+    return file_uri(path, 'ro')
 
 
 def sidecars(db_path):
@@ -100,12 +104,16 @@ class DeviceWriteTransaction:
         self.conn = None
 
     def __enter__(self):
-        self.conn = sqlite3.connect(self.db_path, timeout=self.timeout,
-                                    isolation_level=None)
-        self.conn.row_factory = sqlite3.Row
-        self.conn.execute('PRAGMA busy_timeout = %d' % int(self.timeout * 1000))
-        self.conn.execute('BEGIN IMMEDIATE')
-        return self.conn
+        self.conn = sqlite3.connect(file_uri(self.db_path, 'rw'), uri=True,
+                                    timeout=self.timeout, isolation_level=None)
+        try:
+            self.conn.row_factory = sqlite3.Row
+            self.conn.execute('BEGIN IMMEDIATE')
+            return self.conn
+        except BaseException:
+            self.conn.close()
+            self.conn = None
+            raise
 
     def __exit__(self, exc_type, exc, tb):
         try:

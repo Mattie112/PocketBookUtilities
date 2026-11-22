@@ -390,7 +390,8 @@ class ConfigWidget(QWidget):
             calibre_collections)
         try:
             ids = list(self.gui.current_db.new_api.all_book_ids())[:10]
-            found = calibre_collections(self.gui, settings, ids)
+            errors = {}
+            found = calibre_collections(self.gui, settings, ids, errors)
         except Exception as err:
             self.collections_preview.setPlainText('Preview failed: %s' % err)
             return
@@ -399,8 +400,9 @@ class ConfigWidget(QWidget):
         lines = []
         for book_id in ids:
             names = sorted(found.get(book_id, ()))
-            lines.append('%-44s %s' % ((titles.get(book_id) or '')[:44],
-                                       ', '.join(names) or '(none)'))
+            detail = ('Template error: %s' % errors[book_id] if book_id in errors
+                      else ', '.join(names) or '(none)')
+            lines.append('%-44s %s' % ((titles.get(book_id) or '')[:44], detail))
         self.collections_preview.setPlainText('\n'.join(lines))
 
     def _forget_state(self):
